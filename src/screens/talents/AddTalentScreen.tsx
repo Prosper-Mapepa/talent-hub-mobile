@@ -8,8 +8,10 @@ import {
   Alert,
   Image,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
+import { fetchAllTalents } from '../../store/slices/talentsSlice';
 import { addTalent } from '../../store/slices/talentsSlice';
 import { useNavigation } from '@react-navigation/native';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -56,11 +58,28 @@ export default function AddTalentScreen() {
     });
 
     if (!result.canceled) {
-      const newFiles = result.assets.map(asset => ({
+      const newFiles = result.assets.map((asset, index) => {
+        // Determine file extension from URI or MIME type
+        let extension = 'jpg';
+        if (asset.type === 'video') {
+          extension = asset.uri.includes('.mov') ? 'mov' : 
+                     asset.uri.includes('.mp4') ? 'mp4' : 'mp4';
+        } else {
+          extension = asset.uri.includes('.png') ? 'png' :
+                     asset.uri.includes('.gif') ? 'gif' :
+                     asset.uri.includes('.webp') ? 'webp' : 'jpg';
+        }
+        
+        const fileName = asset.fileName || 
+                        (asset.type === 'video' ? `video_${Date.now()}_${index}.${extension}` : 
+                         `image_${Date.now()}_${index}.${extension}`);
+        
+        return {
         uri: asset.uri,
         type: asset.type || 'image',
-        name: asset.fileName || `image_${Date.now()}`,
-      }));
+          name: fileName,
+        };
+      });
       setSelectedFiles(prev => [...prev, ...newFiles]);
     }
   };
@@ -87,15 +106,15 @@ export default function AddTalentScreen() {
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
-      Alert.alert('Error', 'Please enter a title for your talent');
+      showToast('Please enter a title for your talent', 'error');
       return;
     }
     if (!formData.category.trim()) {
-      Alert.alert('Error', 'Please select a category for your talent');
+      showToast('Please select a category for your talent', 'error');
       return;
     }
     if (!formData.description.trim()) {
-      Alert.alert('Error', 'Please enter a description for your talent');
+      showToast('Please enter a description for your talent', 'error');
       return;
     }
 
@@ -106,11 +125,15 @@ export default function AddTalentScreen() {
         files: selectedFiles,
       })).unwrap();
       
-      Alert.alert('Success', 'Talent added successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
+      // Refresh the talents list to ensure latest data
+      await dispatch(fetchAllTalents());
+      
+      showToast('Talent added successfully!', 'success', {
+        text: 'OK',
+        onPress: () => navigation.goBack()
+      });
     } catch (error) {
-      Alert.alert('Error', 'Failed to add talent. Please try again.');
+      showToast('Failed to add talent. Please try again.', 'error');
     }
   };
 

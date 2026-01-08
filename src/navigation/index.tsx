@@ -6,6 +6,7 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 
 // Import screens
+import LoadingScreen from '../screens/LoadingScreen';
 import WelcomeScreen from '../screens/auth/WelcomeScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
@@ -31,9 +32,11 @@ import MyTalentsScreen from '../screens/profile/MyTalentsScreen';
 import SkillsScreen from '../screens/profile/SkillsScreen';
 import ProjectsScreen from '../screens/profile/ProjectsScreen';
 import AchievementsScreen from '../screens/profile/AchievementsScreen';
+import JobApplicationsScreen from '../screens/business/JobApplicationsScreen';
 
 // Import components
 import TabBarIcon from '../components/TabBarIcon';
+import { COLORS } from '../theme/colors';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -80,7 +83,11 @@ const MainTabNavigator = () => {
 };
 
 const MainStack = () => (
-  <Stack.Navigator>
+  <Stack.Navigator
+    screenOptions={{
+      headerTintColor: COLORS.maroon,
+    }}
+  >
     <Stack.Screen 
       name="MainTabs" 
       component={MainTabNavigator} 
@@ -107,9 +114,16 @@ const MainStack = () => (
       options={{ title: 'Business Profile' }}
     />
     <Stack.Screen 
+      name="JobApplications" 
+      component={JobApplicationsScreen}
+      options={{ title: 'Applications', headerShown: false }}
+    />
+    <Stack.Screen 
       name="TalentDetail" 
       component={TalentDetailScreen}
-      options={{ title: 'Talent Details' }}
+      options={{ 
+        title: 'Talent Details',
+      }}
     />
     <Stack.Screen 
       name="AddTalent" 
@@ -153,11 +167,11 @@ const AppNavigator = () => {
   const { isAuthenticated, isLoading } = useSelector((state: RootState) => state.auth);
 
   if (isLoading) {
-    // Show loading screen instead of null
+    // Show loading screen
     return (
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Auth" component={AuthStack} />
+          <Stack.Screen name="Loading" component={LoadingScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     );

@@ -11,6 +11,7 @@ import {
   TextInput,
   Dimensions,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchStudentTalents, addTalent, updateTalent, deleteTalent } from '../../store/slices/talentsSlice';
@@ -54,7 +55,7 @@ const MyTalentsScreen: React.FC = () => {
 
   const handleSaveTalent = async () => {
     if (!talentForm.title.trim() || !talentForm.category.trim() || !talentForm.description.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      showToast('Please fill in all required fields', 'error');
       return;
     }
 
@@ -66,14 +67,14 @@ const MyTalentsScreen: React.FC = () => {
           talentData: talentForm,
           files: selectedFiles,
         })).unwrap();
-        Alert.alert('Success', 'Talent updated successfully!');
+        showToast('Talent updated successfully!', 'success');
       } else {
         await dispatch(addTalent({
           studentId: user?.studentId!,
           talentData: talentForm,
           files: selectedFiles,
         })).unwrap();
-        Alert.alert('Success', 'Talent added successfully!');
+        showToast('Talent added successfully!', 'success');
       }
       setShowTalentModal(false);
       setEditingTalent(null);
@@ -82,34 +83,30 @@ const MyTalentsScreen: React.FC = () => {
     } catch (error: any) {
       console.error('Error saving talent:', error);
       const errorMessage = error.message || 'Failed to save talent';
-      Alert.alert('Error', errorMessage);
+      showToast(errorMessage, 'error');
     }
   };
 
   const handleDeleteTalent = (talent: Talent) => {
-    Alert.alert(
-      'Delete Talent',
+    showToast(
       'Are you sure you want to delete this talent?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await dispatch(deleteTalent({
-                studentId: talent.studentId,
-                talentId: talent.id,
-              })).unwrap();
-              Alert.alert('Success', 'Talent deleted successfully!');
-            } catch (error: any) {
-              console.error('Error deleting talent:', error);
-              const errorMessage = error.message || 'Failed to delete talent';
-              Alert.alert('Error', errorMessage);
-            }
-          },
+      'warning',
+      {
+        text: 'Delete',
+        onPress: async () => {
+          try {
+            await dispatch(deleteTalent({
+              studentId: talent.studentId,
+              talentId: talent.id,
+            })).unwrap();
+            showToast('Talent deleted successfully!', 'success');
+          } catch (error: any) {
+            console.error('Error deleting talent:', error);
+            const errorMessage = error.message || 'Failed to delete talent';
+            showToast(errorMessage, 'error');
+          }
         },
-      ]
+      }
     );
   };
 

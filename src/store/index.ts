@@ -6,6 +6,7 @@ import businessesReducer from './slices/businessesSlice';
 import messagesReducer from './slices/messagesSlice';
 import adminReducer from './slices/adminSlice';
 import talentsReducer from './slices/talentsSlice';
+import followsReducer from './slices/followsSlice';
 import { TypedUseSelectorHook, useSelector, useDispatch } from 'react-redux';
 
 export const store = configureStore({
@@ -17,6 +18,7 @@ export const store = configureStore({
     messages: messagesReducer,
     admin: adminReducer,
     talents: talentsReducer,
+    follows: followsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

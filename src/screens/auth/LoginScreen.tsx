@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
   Dimensions,
   ActivityIndicator,
   Animated,
@@ -90,7 +91,13 @@ const LoginScreen: React.FC = () => {
               {/* Header */}
               <View style={styles.header}>
               
-                <FuturisticLogo />
+              <View style={styles.logoGlow} />
+                <View style={styles.logoContainer}>
+                  <Image 
+                    source={require('../../../assets/ss.png')} 
+                    style={styles.logo} 
+                  />
+                </View>
                 <Text style={styles.title}>CMU <Text style={styles.title2}>TALENT</Text>HUB</Text>
                 <Text style={styles.subtitle}>Sign in to your account</Text>
               </View>
@@ -254,7 +261,8 @@ const styles = StyleSheet.create({
   form: {
     backgroundColor: 'white',
     borderRadius: 20,
-    padding: 30,
+    paddingVertical: 30,
+    paddingHorizontal: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -342,6 +350,7 @@ const styles = StyleSheet.create({
   registerText: {
     fontSize: 14,
     color: '#666',
+    fontWeight: '400',
   },
   registerLinkText: {
     color: '#8F1A27',
@@ -398,6 +407,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(106, 0, 50, 0.1)',
     borderRadius: 30,
     transform: [{ rotate: '30deg' }],
+  },
+  logoContainer: {
+    position: 'relative',
+    marginBottom: 30,
+  },
+  logo: {
+    width: 170, 
+    height: 120,
+    borderRadius: 25,
+    zIndex: 2,
+  },
+  logoGlow: {
+    position: 'absolute',
+    top: -9,
+    left: -9,
+    right: -9,
+    bottom: -9,
+    // borderRadius: 100,
+    // backgroundColor: '#FFFFFF',
+    zIndex: 1,
   },
 });
 

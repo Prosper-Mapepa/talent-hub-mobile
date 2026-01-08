@@ -40,6 +40,7 @@ export interface Student {
   bio: string;
   about: string | null;
   profileViews: number;
+  profileImage?: string;
   skills: Skill[];
   projects: Project[];
   achievements: Achievement[];

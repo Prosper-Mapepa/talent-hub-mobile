@@ -916,7 +916,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 20,
+    paddingVertical: 20,
+    // paddingHorizontal: 10,
     marginHorizontal: 20,
     marginBottom: 20,
     marginTop: 20,
@@ -937,9 +938,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#6B7280',
     marginTop: 4,
+    fontWeight: '600',
   },
 });
 

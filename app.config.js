@@ -1,0 +1,42 @@
+import 'dotenv/config';
+
+export default {
+  expo: {
+    name: "StudentTalentHubMobile",
+    slug: "StudentTalentHubMobile",
+    version: "1.0.2",
+    orientation: "portrait",
+    icon: "./assets/icon.png",
+    userInterfaceStyle: "light",
+    newArchEnabled: true,
+    splash: {
+      image: "./assets/splash.png",
+      resizeMode: "contain",
+      backgroundColor: "#8F1A27"
+    },
+    ios: {
+      supportsTablet: true
+    },
+    android: {
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#8F1A27"
+      },
+      edgeToEdgeEnabled: true,
+      package: "com.prospermap.StudentTalentHubMobile"
+    },
+    web: {
+      favicon: "./assets/favicon.png"
+    },
+    extra: {
+      eas: {
+        projectId: "6c631a05-9ba5-4202-ad44-0348f65f74ea"
+      },
+      apiBaseUrl: process.env.API_BASE_URL || "http://192.168.0.106:3001"
+    },
+    plugins: [
+      "expo-av"
+    ]
+  }
+};
+

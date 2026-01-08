@@ -100,7 +100,10 @@ const talentsSlice = createSlice({
       })
       .addCase(fetchAllTalents.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.talents = action.payload;
+        // Ensure payload is always an array
+        const talents = Array.isArray(action.payload) ? action.payload : [];
+        console.log(`Setting ${talents.length} talents in Redux store`);
+        state.talents = talents;
       })
       .addCase(fetchAllTalents.rejected, (state, action) => {
         state.isLoading = false;
@@ -115,7 +118,8 @@ const talentsSlice = createSlice({
       })
       .addCase(addTalent.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.talents.push(action.payload);
+        // Add new talent at the beginning (most recent first)
+        state.talents.unshift(action.payload);
       })
       .addCase(addTalent.rejected, (state, action) => {
         state.isLoading = false;

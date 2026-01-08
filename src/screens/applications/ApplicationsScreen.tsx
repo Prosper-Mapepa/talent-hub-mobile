@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,23 +7,26 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
   TextInput,
   Image,
+  ScrollView,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchJobs } from '../../store/slices/jobsSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { Application, UserRole } from '../../types';
+import { Application, UserRole, ApplicationStatus } from '../../types';
 import { LinearGradient } from 'expo-linear-gradient';
+import { showToast } from '../../components/ui/toast';
+import { COLORS } from '../../theme/colors';
 
 const ApplicationsScreen: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useAppSelector(state => state.auth);
   const { jobs, isLoading, error } = useAppSelector(state => state.jobs);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('ALL');
 
   useEffect(() => {
     dispatch(fetchJobs({}));
@@ -51,7 +54,27 @@ const ApplicationsScreen: React.FC = () => {
       .sort((a, b) => new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime());
   };
 
-  const applications = getMyApplications();
+  const allApplications = getMyApplications();
+
+  // Filter applications based on active tab
+  const applications = useMemo(() => {
+    if (activeTab === 'ALL') {
+      return allApplications;
+    }
+    return allApplications.filter(app => app.status === activeTab);
+  }, [allApplications, activeTab]);
+
+  // Get counts for each status
+  const statusCounts = useMemo(() => {
+    return {
+      ALL: allApplications.length,
+      PENDING: allApplications.filter(app => app.status === ApplicationStatus.PENDING).length,
+      REVIEWING: allApplications.filter(app => app.status === ApplicationStatus.REVIEWING).length,
+      INTERVIEWING: allApplications.filter(app => app.status === ApplicationStatus.INTERVIEWING).length,
+      ACCEPTED: allApplications.filter(app => app.status === ApplicationStatus.ACCEPTED).length,
+      REJECTED: allApplications.filter(app => app.status === ApplicationStatus.REJECTED).length,
+    };
+  }, [allApplications]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -75,23 +98,40 @@ const ApplicationsScreen: React.FC = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString(undefined, { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) {
+      // Try to use createdAt as fallback
+      return null;
+    }
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch (error) {
+      return null;
+    }
   };
 
   const renderApplicationCard = ({ item: application }: { item: Application & { job: any } }) => (
     <TouchableOpacity
       style={styles.applicationCard}
       onPress={() => {
-        Alert.alert(
-          'Application Details',
-          `Job: ${application.job.title}\nCompany: ${application.job.business?.businessName}\nStatus: ${getStatusText(application.status)}\nApplied: ${formatDate(application.appliedAt)}${application.coverLetter ? `\n\nCover Letter: ${application.coverLetter}` : ''}`
-        );
+        const appliedDate = formatDate(application.appliedAt) || formatDate((application as any).createdAt) || 'Date not available';
+        const details = [
+          `Job: ${application.job.title}`,
+          `Company: ${application.job.business?.businessName || 'N/A'}`,
+          `Status: ${getStatusText(application.status)}`,
+          `Applied: ${appliedDate}`,
+          application.coverLetter ? `\nCover Letter: ${application.coverLetter}` : ''
+        ].filter(Boolean).join('\n');
+        
+        showToast(details, 'info');
       }}
     >
       <View style={styles.applicationHeader}>
@@ -113,17 +153,21 @@ const ApplicationsScreen: React.FC = () => {
       </View>
 
       <View style={styles.applicationMeta}>
+        {(formatDate(application.appliedAt) || formatDate((application as any).createdAt)) && (
+          <View style={styles.metaItem}>
+            <Ionicons name="calendar" size={16} color={COLORS.maroon} />
+            <Text style={styles.metaText}>
+              Applied {formatDate(application.appliedAt) || formatDate((application as any).createdAt)}
+            </Text>
+          </View>
+        )}
         <View style={styles.metaItem}>
-          <Ionicons name="calendar" size={16} color="#6B7280" />
-          <Text style={styles.metaText}>Applied {formatDate(application.appliedAt)}</Text>
-        </View>
-        <View style={styles.metaItem}>
-          <Ionicons name="location" size={16} color="#6B7280" />
+          <Ionicons name="location" size={16} color={COLORS.maroon} />
           <Text style={styles.metaText}>{application.job.location}</Text>
         </View>
         {application.job.salary && (
           <View style={styles.metaItem}>
-            <Ionicons name="cash" size={16} color="#6B7280" />
+            <Ionicons name="cash" size={16} color={COLORS.maroon} />
             <Text style={styles.metaText}>{application.job.salary}</Text>
           </View>
         )}
@@ -140,13 +184,13 @@ const ApplicationsScreen: React.FC = () => {
 
       <View style={styles.applicationFooter}>
         <View style={styles.jobTypeContainer}>
-          <View style={styles.jobTypeBadge}>
-            <Text style={styles.jobTypeText}>
+          <View style={[styles.jobTypeBadge, { backgroundColor: COLORS.maroon + '15', borderColor: COLORS.maroon + '40' }]}>
+            <Text style={[styles.jobTypeText, { color: COLORS.maroon }]}>
               {application.job.type.replace('_', ' ')}
             </Text>
           </View>
-          <View style={styles.experienceBadge}>
-            <Text style={styles.experienceText}>
+          <View style={[styles.experienceBadge, { backgroundColor: COLORS.maroon + '15', borderColor: COLORS.maroon + '40' }]}>
+            <Text style={[styles.experienceText, { color: COLORS.maroon }]}>
               {application.job.experienceLevel.replace('_', ' ')}
             </Text>
           </View>
@@ -190,24 +234,77 @@ const ApplicationsScreen: React.FC = () => {
         </View>
       </LinearGradient>
 
-      {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{applications.length}</Text>
-          <Text style={styles.statLabel}>Total Applications</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>
-            {applications.filter(app => app.status === 'PENDING').length}
-          </Text>
-          <Text style={styles.statLabel}>Pending</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>
-            {applications.filter(app => app.status === 'ACCEPTED').length}
-          </Text>
-          <Text style={styles.statLabel}>Accepted</Text>
-        </View>
+      {/* Tabs Navigation */}
+      <View style={styles.tabsContainer}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsScrollContent}
+        >
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'ALL' && styles.activeTab]}
+            onPress={() => setActiveTab('ALL')}
+          >
+            <Text style={[styles.tabText, activeTab === 'ALL' && styles.activeTabText]}>
+              All ({statusCounts.ALL})
+            </Text>
+          </TouchableOpacity>
+          
+          {statusCounts.PENDING > 0 && (
+            <TouchableOpacity
+              style={[styles.tab, activeTab === ApplicationStatus.PENDING && styles.activeTab]}
+              onPress={() => setActiveTab(ApplicationStatus.PENDING)}
+            >
+              <Text style={[styles.tabText, activeTab === ApplicationStatus.PENDING && styles.activeTabText]}>
+                Pending ({statusCounts.PENDING})
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {statusCounts.REVIEWING > 0 && (
+            <TouchableOpacity
+              style={[styles.tab, activeTab === ApplicationStatus.REVIEWING && styles.activeTab]}
+              onPress={() => setActiveTab(ApplicationStatus.REVIEWING)}
+            >
+              <Text style={[styles.tabText, activeTab === ApplicationStatus.REVIEWING && styles.activeTabText]}>
+                Reviewing ({statusCounts.REVIEWING})
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {statusCounts.INTERVIEWING > 0 && (
+            <TouchableOpacity
+              style={[styles.tab, activeTab === ApplicationStatus.INTERVIEWING && styles.activeTab]}
+              onPress={() => setActiveTab(ApplicationStatus.INTERVIEWING)}
+            >
+              <Text style={[styles.tabText, activeTab === ApplicationStatus.INTERVIEWING && styles.activeTabText]}>
+                Interviewing ({statusCounts.INTERVIEWING})
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {statusCounts.ACCEPTED > 0 && (
+            <TouchableOpacity
+              style={[styles.tab, activeTab === ApplicationStatus.ACCEPTED && styles.activeTab]}
+              onPress={() => setActiveTab(ApplicationStatus.ACCEPTED)}
+            >
+              <Text style={[styles.tabText, activeTab === ApplicationStatus.ACCEPTED && styles.activeTabText]}>
+                Accepted ({statusCounts.ACCEPTED})
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {statusCounts.REJECTED > 0 && (
+            <TouchableOpacity
+              style={[styles.tab, activeTab === ApplicationStatus.REJECTED && styles.activeTab]}
+              onPress={() => setActiveTab(ApplicationStatus.REJECTED)}
+            >
+              <Text style={[styles.tabText, activeTab === ApplicationStatus.REJECTED && styles.activeTabText]}>
+                Rejected ({statusCounts.REJECTED})
+              </Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
       </View>
 
       {/* Applications List */}
@@ -222,8 +319,16 @@ const ApplicationsScreen: React.FC = () => {
       ) : applications.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="document-outline" size={64} color="#6B7280" />
-          <Text style={styles.emptyText}>No applications yet</Text>
-          <Text style={styles.emptySubtext}>Start applying to jobs to see your applications here</Text>
+          <Text style={styles.emptyText}>
+            {activeTab === 'ALL' 
+              ? 'No applications yet' 
+              : `No ${getStatusText(activeTab).toLowerCase()} applications`}
+          </Text>
+          <Text style={styles.emptySubtext}>
+            {activeTab === 'ALL' 
+              ? 'Start applying to jobs to see your applications here'
+              : 'Try selecting a different status tab'}
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -249,7 +354,7 @@ const styles = StyleSheet.create({
   headerGradient: {
     paddingTop: 35,
     paddingBottom: 10,
-    marginBottom: 20,
+
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -278,34 +383,34 @@ const styles = StyleSheet.create({
   headerActions: {
     // Add any action buttons here if needed
   },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
+  tabsContainer: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    paddingVertical: 20,
     marginBottom: 20,
-    gap: 12,
   },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+  tabsScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#6A0032',
-    marginBottom: 4,
+  tab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f3f4f6',
+    marginRight: 8,
   },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
+  activeTab: {
+    backgroundColor: '#8F1A27',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  activeTabText: {
+    color: '#fff',
   },
   applicationsList: {
     flex: 1,
@@ -391,26 +496,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   jobTypeBadge: {
-    backgroundColor: '#E5E7EB',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
   },
   jobTypeText: {
     fontSize: 10,
-    color: '#374151',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   experienceBadge: {
-    backgroundColor: '#F3F4F6',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
   },
   experienceText: {
     fontSize: 10,
-    color: '#6B7280',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,

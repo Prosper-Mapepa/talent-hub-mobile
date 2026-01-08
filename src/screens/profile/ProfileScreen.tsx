@@ -13,6 +13,7 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../types';
@@ -20,24 +21,27 @@ import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { logout } from '../../store/slices/authSlice';
 import { fetchStudentProfile, updateStudentProfile } from '../../store/slices/studentsSlice';
-import { fetchBusinessProfile, updateBusinessProfile } from '../../store/slices/businessesSlice';
+import { fetchBusinessProfile, updateBusinessProfile, fetchBusinessJobs } from '../../store/slices/businessesSlice';
 import { fetchStudentTalents } from '../../store/slices/talentsSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { UserRole } from '../../types';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const dispatch = useDispatch<AppDispatch>();
+  const insets = useSafeAreaInsets();
   const { user } = useAppSelector(state => state.auth);
   const { profile: student, isLoading: studentLoading } = useAppSelector(state => state.students);
-  const { profile: business, isLoading: businessLoading } = useAppSelector(state => state.businesses);
+  const { profile: business, jobs: businessJobs, isLoading: businessLoading } = useAppSelector(state => state.businesses);
   const { talents, isLoading: talentsLoading } = useAppSelector(state => state.talents);
   
   // Modal states
   const [showEditModal, setShowEditModal] = useState(false);
+  const [saving, setSaving] = useState(false);
   
   // Form states
   const [editForm, setEditForm] = useState({
@@ -61,6 +65,7 @@ const ProfileScreen: React.FC = () => {
       }
     } else if (user?.role === UserRole.BUSINESS) {
       dispatch(fetchBusinessProfile());
+      dispatch(fetchBusinessJobs());
     }
   }, [dispatch, user?.role, user?.studentId]);
 
@@ -95,17 +100,18 @@ const ProfileScreen: React.FC = () => {
   }, [student, business, user]);
 
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
+    showToast(
       'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => dispatch(logout()) },
-      ]
+      'warning',
+      {
+        text: 'Logout',
+        onPress: () => dispatch(logout()),
+      }
     );
   };
 
   const handleSaveProfile = async () => {
+    setSaving(true);
     try {
       if (user?.role === UserRole.STUDENT) {
         await dispatch(updateStudentProfile({
@@ -115,7 +121,7 @@ const ProfileScreen: React.FC = () => {
           graduationYear: parseInt(editForm.year) || 0,
           bio: editForm.bio,
         })).unwrap();
-        Alert.alert('Success', 'Profile updated successfully!');
+        showToast('Profile updated successfully!', 'success');
       } else if (user?.role === UserRole.BUSINESS) {
         await dispatch(updateBusinessProfile({
           businessName: editForm.businessName,
@@ -123,11 +129,13 @@ const ProfileScreen: React.FC = () => {
           location: editForm.location,
           description: editForm.description,
         })).unwrap();
-        Alert.alert('Success', 'Profile updated successfully!');
+        showToast('Profile updated successfully!', 'success');
       }
       setShowEditModal(false);
     } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
+      showToast('Failed to update profile', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -198,17 +206,30 @@ const ProfileScreen: React.FC = () => {
       </View> */}
 
       {/* Bio Section */}
-      {student?.bio && (
-        <View style={styles.bioSection}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="chatbubble-ellipses" size={20} color="#6A0032" />
-            <Text style={styles.sectionTitle}>About Me</Text>
-          </View>
-          <View style={styles.bioCard}>
-            <Text style={styles.bioText}>{student.bio}</Text>
-          </View>
+      <View style={styles.bioSection}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="chatbubble-ellipses" size={20} color="#6A0032" />
+          <Text style={styles.sectionTitle}>About Me</Text>
         </View>
-      )}
+        <TouchableOpacity 
+          style={styles.bioCard}
+          onPress={() => setShowEditModal(true)}
+          activeOpacity={0.7}
+        >
+          {student?.bio ? (
+            <Text style={styles.bioText}>{student.bio}</Text>
+          ) : (
+            <View style={styles.emptyBioContainer}>
+              <Ionicons name="add-circle-outline" size={24} color="#9CA3AF" />
+              <Text style={styles.emptyBioText}>Tap to add your bio</Text>
+            </View>
+          )}
+          <View style={styles.bioEditHint}>
+            <Ionicons name="create-outline" size={16} color="#8F1A27" />
+            <Text style={styles.bioEditHintText}>Edit</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
 
       {/* Portfolio Navigation */}
       <View style={styles.portfolioSection}>
@@ -276,70 +297,205 @@ const ProfileScreen: React.FC = () => {
     </ScrollView>
   );
 
-  const renderBusinessProfile = () => (
-    <ScrollView style={styles.content}>
-      <View style={styles.profileHeader}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {business?.businessName?.charAt(0) || user?.email?.charAt(0) || '?'}
-          </Text>
-        </View>
-        <Text style={styles.name}>{business?.businessName || 'Business'}</Text>
-        <Text style={styles.role}>Business</Text>
-      </View>
+  const renderBusinessProfile = () => {
+    const businessInitial = business?.businessName?.charAt(0) || user?.email?.charAt(0) || '?';
+    const jobs = businessJobs || [];
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Business Information</Text>
-        <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <Ionicons name="business" size={20} color="#6B7280" />
-            <Text style={styles.infoLabel}>Business Name:</Text>
-            <Text style={styles.infoValue}>{business?.businessName || 'Not set'}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="mail" size={20} color="#6B7280" />
-            <Text style={styles.infoLabel}>Email:</Text>
-            <Text style={styles.infoValue}>{user?.email}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="briefcase" size={20} color="#6B7280" />
-            <Text style={styles.infoLabel}>Business Type:</Text>
-            <Text style={styles.infoValue}>{business?.businessType || 'Not set'}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="location" size={20} color="#6B7280" />
-            <Text style={styles.infoLabel}>Location:</Text>
-            <Text style={styles.infoValue}>{business?.location || 'Not set'}</Text>
-          </View>
-        </View>
-      </View>
-
-      {business?.description && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <View style={styles.infoCard}>
-            <Text style={styles.bioText}>{business.description}</Text>
-          </View>
-        </View>
-      )}
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Job Postings</Text>
-        <View style={styles.infoCard}>
-          {business?.jobs && business.jobs.length > 0 ? (
-            business.jobs.map((job, index) => (
-              <View key={index} style={styles.jobItem}>
-                <Text style={styles.jobTitle}>{job.title}</Text>
-                <Text style={styles.jobType}>{job.type.replace('_', ' ')}</Text>
+    return (
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Profile Card */}
+        <View style={styles.businessProfileCard}>
+          <View style={styles.businessProfileHeader}>
+            <View style={styles.businessAvatar}>
+              <Text style={styles.businessAvatarText}>{businessInitial}</Text>
+            </View>
+            <View style={styles.businessProfileInfo}>
+              <Text style={styles.businessName}>{business?.businessName || 'Business'}</Text>
+              <View style={styles.businessInfoChips}>
+                <View style={styles.businessInfoChip}>
+                  <Ionicons name="briefcase-outline" size={12} color="#6b7280" />
+                  <Text style={styles.businessInfoChipText}>Business</Text>
+                </View>
+                {business?.businessType && (
+                  <View style={styles.businessInfoChip}>
+                    <Ionicons name="business-outline" size={12} color="#6b7280" />
+                    <Text style={styles.businessInfoChipText} numberOfLines={1}>
+                      {business.businessType.replace('_', ' ')}
+                    </Text>
+                  </View>
+                )}
+                {business?.location && (
+                  <View style={styles.businessInfoChip}>
+                    <Ionicons name="location-outline" size={12} color="#6b7280" />
+                    <Text style={styles.businessInfoChipText} numberOfLines={1}>
+                      {business.location}
+                    </Text>
+                  </View>
+                )}
               </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>No job postings yet</Text>
-          )}
+            </View>
+          </View>
         </View>
-      </View>
-    </ScrollView>
-  );
+
+        {/* Description Section */}
+        <View style={styles.businessSection}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="chatbubble-ellipses" size={20} color="#8F1A27" />
+            <Text style={styles.sectionTitle}>Description</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.businessBioCard}
+            onPress={() => setShowEditModal(true)}
+            activeOpacity={0.7}
+          >
+            {business?.description ? (
+              <Text style={styles.businessBioText}>{business.description}</Text>
+            ) : (
+              <View style={styles.emptyBioContainer}>
+                <Ionicons name="add-circle-outline" size={24} color="#9CA3AF" />
+                <Text style={styles.emptyBioText}>Tap to add your business description</Text>
+              </View>
+            )}
+            <View style={styles.bioEditHint}>
+              <Ionicons name="create-outline" size={16} color="#8F1A27" />
+              <Text style={styles.bioEditHintText}>Edit</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Business Information */}
+        <View style={styles.businessSection}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="information-circle" size={20} color="#8F1A27" />
+            <Text style={styles.sectionTitle}>Business Information</Text>
+          </View>
+          <View style={styles.businessInfoCard}>
+            <View style={styles.businessInfoRow}>
+              <View style={styles.businessInfoLeft}>
+                <Ionicons name="business" size={18} color="#6b7280" />
+                <Text style={styles.businessInfoLabel}>Business Name</Text>
+              </View>
+              <Text style={styles.businessInfoValue} numberOfLines={1}>
+                {business?.businessName || 'Not set'}
+              </Text>
+            </View>
+            <View style={styles.businessInfoDivider} />
+            <View style={styles.businessInfoRow}>
+              <View style={styles.businessInfoLeft}>
+                <Ionicons name="mail" size={18} color="#6b7280" />
+                <Text style={styles.businessInfoLabel}>Email</Text>
+              </View>
+              <Text style={styles.businessInfoValue} numberOfLines={1}>
+                {user?.email || 'Not set'}
+              </Text>
+            </View>
+            {business?.businessType && (
+              <>
+                <View style={styles.businessInfoDivider} />
+                <View style={styles.businessInfoRow}>
+                  <View style={styles.businessInfoLeft}>
+                    <Ionicons name="briefcase" size={18} color="#6b7280" />
+                    <Text style={styles.businessInfoLabel}>Business Type</Text>
+                  </View>
+                  <Text style={styles.businessInfoValue} numberOfLines={1}>
+                    {business.businessType.replace('_', ' ')}
+                  </Text>
+                </View>
+              </>
+            )}
+            {business?.location && (
+              <>
+                <View style={styles.businessInfoDivider} />
+                <View style={styles.businessInfoRow}>
+                  <View style={styles.businessInfoLeft}>
+                    <Ionicons name="location" size={18} color="#6b7280" />
+                    <Text style={styles.businessInfoLabel}>Location</Text>
+                  </View>
+                  <Text style={styles.businessInfoValue} numberOfLines={1}>
+                    {business.location}
+                  </Text>
+                </View>
+              </>
+            )}
+            {business?.website && (
+              <>
+                <View style={styles.businessInfoDivider} />
+                <View style={styles.businessInfoRow}>
+                  <View style={styles.businessInfoLeft}>
+                    <Ionicons name="globe" size={18} color="#6b7280" />
+                    <Text style={styles.businessInfoLabel}>Website</Text>
+                  </View>
+                  <Text style={styles.businessInfoValue} numberOfLines={1}>
+                    {business.website}
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+
+        {/* Job Postings */}
+        <View style={styles.businessSection}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="briefcase" size={20} color="#8F1A27" />
+            <Text style={styles.sectionTitle}>Job Postings</Text>
+            <Text style={styles.sectionSubtitle}>{jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}</Text>
+          </View>
+          <View style={styles.businessInfoCard}>
+            {jobs.length > 0 ? (
+              jobs.map((job) => (
+                <TouchableOpacity
+                  key={job.id}
+                  style={styles.businessJobItem}
+                  onPress={() => (navigation as any).navigate('MainTabs', { screen: 'Dashboard' })}
+                >
+                  <View style={styles.businessJobContent}>
+                    <Text style={styles.businessJobTitle} numberOfLines={1}>{job.title}</Text>
+                    <View style={styles.businessJobMeta}>
+                      <View style={styles.businessJobBadge}>
+                        <Text style={styles.businessJobBadgeText}>
+                          {job.type.replace('_', ' ')}
+                        </Text>
+                      </View>
+                      <View style={styles.businessJobBadge}>
+                        <Text style={styles.businessJobBadgeText}>
+                          {job.experienceLevel.replace('_', ' ')}
+                        </Text>
+                      </View>
+                      {job.applications && job.applications.length > 0 && (
+                        <View style={[styles.businessJobBadge, styles.applicationBadge]}>
+                          <Ionicons name="people" size={12} color="#8F1A27" />
+                          <Text style={[styles.businessJobBadgeText, styles.applicationBadgeText]}>
+                            {job.applications.length} {job.applications.length === 1 ? 'application' : 'applications'}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={styles.businessEmptyContainer}>
+                <Ionicons name="briefcase-outline" size={48} color="#d1d5db" />
+                <Text style={styles.businessEmptyText}>No job postings yet</Text>
+                <Text style={styles.businessEmptySubtext}>
+                  Create your first job posting to attract talent
+                </Text>
+                <TouchableOpacity
+                  style={styles.businessEmptyButton}
+                  onPress={() => (navigation as any).navigate('MainTabs', { screen: 'Dashboard' })}
+                >
+                  <Ionicons name="add-circle" size={20} color="#fff" />
+                  <Text style={styles.businessEmptyButtonText}>Go to Dashboard</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+    );
+  };
 
   const renderEditModal = () => (
     <Modal
@@ -350,14 +506,18 @@ const ProfileScreen: React.FC = () => {
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
+          <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
             <Text style={styles.modalTitle}>Edit Profile</Text>
             <TouchableOpacity onPress={() => setShowEditModal(false)}>
-              <Ionicons name="close" size={24} color="#000" />
+              <Ionicons name="close" size={24} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalBody}>
+          <ScrollView 
+            style={styles.modalBody}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 20 }}
+          >
             {user?.role === UserRole.STUDENT ? (
               <>
                 <View style={styles.inputGroup}>
@@ -456,14 +616,28 @@ const ProfileScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => setShowEditModal(false)}
+              disabled={saving}
             >
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.saveButton}
               onPress={handleSaveProfile}
+              disabled={saving}
+              activeOpacity={0.8}
+              style={styles.saveButtonWrapper}
             >
-              <Text style={styles.saveButtonText}>Save</Text>
+              <LinearGradient
+                colors={['#8F1A27', '#6A0032', '#8F1A27']}
+                style={styles.saveButton}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </View>
@@ -776,22 +950,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    width: '100%',
+    height: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#1F2937',
   },
   modalBody: {
+    flex: 1,
     padding: 20,
   },
   inputGroup: {
@@ -822,6 +999,7 @@ const styles = StyleSheet.create({
     gap: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
+    backgroundColor: '#fff',
   },
   cancelButton: {
     flex: 1,
@@ -836,12 +1014,20 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     fontWeight: '500',
   },
+  saveButtonWrapper: {
+    flex: 1,
+  },
   saveButton: {
     flex: 1,
-    backgroundColor: '#6A0032',
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6A0032',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveButtonText: {
     fontSize: 14,
@@ -959,6 +1145,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 2,
+    minHeight: 80,
+  },
+  emptyBioContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  emptyBioText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+  },
+  bioEditHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    gap: 6,
+  },
+  bioEditHintText: {
+    fontSize: 12,
+    color: '#8F1A27',
+    fontWeight: '500',
   },
 
   // Portfolio Section
@@ -1019,6 +1232,204 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     lineHeight: 18,
+  },
+
+  // Business Profile Styles
+  businessProfileCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  businessProfileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  businessAvatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#8F1A27',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  businessAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  businessProfileInfo: {
+    flex: 1,
+  },
+  businessName: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  businessInfoChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  businessInfoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  businessInfoChipText: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '600',
+    maxWidth: 120,
+  },
+  businessSection: {
+    marginBottom: 16,
+  },
+  businessBioCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+    minHeight: 80,
+  },
+  businessBioText: {
+    fontSize: 15,
+    color: '#374151',
+    lineHeight: 24,
+  },
+  businessInfoCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  businessInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  businessInfoLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  businessInfoLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  businessInfoValue: {
+    fontSize: 14,
+    color: '#6b7280',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 12,
+  },
+  businessInfoDivider: {
+    height: 1,
+    backgroundColor: '#f3f4f6',
+    marginVertical: 4,
+  },
+  businessJobItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  businessJobContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  businessJobTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  businessJobMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  businessJobBadge: {
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  businessJobBadgeText: {
+    fontSize: 11,
+    color: '#6b7280',
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  applicationBadge: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  applicationBadgeText: {
+    color: '#8F1A27',
+  },
+  businessEmptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  businessEmptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  businessEmptySubtext: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  businessEmptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6A0032',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  businessEmptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

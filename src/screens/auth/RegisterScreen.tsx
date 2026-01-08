@@ -15,6 +15,7 @@ import {
   StatusBar,
   SafeAreaView,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
@@ -59,6 +60,9 @@ const RegisterScreen: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [showMajorPicker, setShowMajorPicker] = useState(false);
+  const [showYearPicker, setShowYearPicker] = useState(false);
+  const [showBusinessTypePicker, setShowBusinessTypePicker] = useState(false);
 
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -252,10 +256,12 @@ const RegisterScreen: React.FC = () => {
                   ]}
                 >
                   <View style={styles.logoGlow} />
+                  <View style={styles.logoContainer}>
                   <Image 
-                    source={require('../../../assets/k.png')} 
+                    source={require('../../../assets/ss.png')} 
                     style={styles.logo} 
                   />
+                </View>
                 </Animated.View>
                 
                 <Animated.Text 
@@ -413,11 +419,51 @@ const RegisterScreen: React.FC = () => {
                       </TouchableOpacity>
                     </View>
                     {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
-                    <View style={styles.inputContainer}>
+                    <TouchableOpacity 
+                      style={styles.selectContainer}
+                      onPress={() => setShowMajorPicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.selectText, !studentData.major && styles.selectPlaceholder]}>
+                        {studentData.major ? majors.find(m => m.value === studentData.major)?.label : 'Select Major'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="#666" />
+                    </TouchableOpacity>
+                    {errors.major && <Text style={styles.fieldError}>{errors.major}</Text>}
+                    <TouchableOpacity 
+                      style={styles.selectContainer}
+                      onPress={() => setShowYearPicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.selectText, !studentData.year && styles.selectPlaceholder]}>
+                        {studentData.year ? years.find(y => y.value === studentData.year)?.label : 'Select Year'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="#666" />
+                    </TouchableOpacity>
+                    {errors.year && <Text style={styles.fieldError}>{errors.year}</Text>}
+                    
+                    {/* Major Picker Modal */}
+                    <Modal
+                      visible={showMajorPicker}
+                      transparent={true}
+                      animationType="slide"
+                      onRequestClose={() => setShowMajorPicker(false)}
+                    >
+                      <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                          <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Select Major</Text>
+                            <TouchableOpacity onPress={() => setShowMajorPicker(false)}>
+                              <Ionicons name="close" size={24} color="#333" />
+                            </TouchableOpacity>
+                          </View>
                       <Picker
                         selectedValue={studentData.major}
-                        onValueChange={(value: string) => handleStudentChange('major', value)}
-                        style={styles.picker}
+                            onValueChange={(value: string) => {
+                              handleStudentChange('major', value);
+                              setShowMajorPicker(false);
+                            }}
+                            style={styles.modalPicker}
                       >
                         <Picker.Item label="Select Major" value="" />
                         {majors.map(option => (
@@ -425,12 +471,31 @@ const RegisterScreen: React.FC = () => {
                         ))}
                       </Picker>
                     </View>
-                    {errors.major && <Text style={styles.fieldError}>{errors.major}</Text>}
-                    <View style={styles.inputContainer}>
+                      </View>
+                    </Modal>
+
+                    {/* Year Picker Modal */}
+                    <Modal
+                      visible={showYearPicker}
+                      transparent={true}
+                      animationType="slide"
+                      onRequestClose={() => setShowYearPicker(false)}
+                    >
+                      <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                          <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Select Year</Text>
+                            <TouchableOpacity onPress={() => setShowYearPicker(false)}>
+                              <Ionicons name="close" size={24} color="#333" />
+                            </TouchableOpacity>
+                          </View>
                       <Picker
                         selectedValue={studentData.year}
-                        onValueChange={(value: string) => handleStudentChange('year', value)}
-                        style={styles.picker}
+                            onValueChange={(value: string) => {
+                              handleStudentChange('year', value);
+                              setShowYearPicker(false);
+                            }}
+                            style={styles.modalPicker}
                       >
                         <Picker.Item label="Select Year" value="" />
                         {years.map(option => (
@@ -438,7 +503,8 @@ const RegisterScreen: React.FC = () => {
                         ))}
                       </Picker>
                     </View>
-                    {errors.year && <Text style={styles.fieldError}>{errors.year}</Text>}
+                      </View>
+                    </Modal>
                   </>
                 ) : (
                   <>
@@ -472,11 +538,40 @@ const RegisterScreen: React.FC = () => {
                       </TouchableOpacity>
                     </View>
                     {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
-                    <View style={styles.inputContainer}>
+                    <TouchableOpacity 
+                      style={styles.selectContainer}
+                      onPress={() => setShowBusinessTypePicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.selectText, !businessData.businessType && styles.selectPlaceholder]}>
+                        {businessData.businessType ? businessTypes.find(bt => bt.value === businessData.businessType)?.label : 'Select Business Type'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="#666" />
+                    </TouchableOpacity>
+                    {errors.businessType && <Text style={styles.fieldError}>{errors.businessType}</Text>}
+                    
+                    {/* Business Type Picker Modal */}
+                    <Modal
+                      visible={showBusinessTypePicker}
+                      transparent={true}
+                      animationType="slide"
+                      onRequestClose={() => setShowBusinessTypePicker(false)}
+                    >
+                      <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                          <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Select Business Type</Text>
+                            <TouchableOpacity onPress={() => setShowBusinessTypePicker(false)}>
+                              <Ionicons name="close" size={24} color="#333" />
+                            </TouchableOpacity>
+                          </View>
                       <Picker
                         selectedValue={businessData.businessType}
-                        onValueChange={(value: string) => handleBusinessChange('businessType', value)}
-                        style={styles.picker}
+                            onValueChange={(value: string) => {
+                              handleBusinessChange('businessType', value);
+                              setShowBusinessTypePicker(false);
+                            }}
+                            style={styles.modalPicker}
                       >
                         <Picker.Item label="Select Business Type" value="" />
                         {businessTypes.map(option => (
@@ -484,7 +579,8 @@ const RegisterScreen: React.FC = () => {
                         ))}
                       </Picker>
                     </View>
-                    {errors.businessType && <Text style={styles.fieldError}>{errors.businessType}</Text>}
+                      </View>
+                    </Modal>
                     <View style={styles.inputContainer}>
                       <TextInput
                         style={styles.input}
@@ -570,18 +666,18 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginTop: 30,
+    marginTop: 5,
     marginBottom: 20,
     zIndex: 1,
   },
   logoContainer: {
     position: 'relative',
-    marginBottom: 20,
+    // marginBottom: 10,
   },
   logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
+    width: 160, 
+    height: 120,
+    borderRadius: 25,
     zIndex: 2,
   },
   logoGlow: {
@@ -590,8 +686,8 @@ const styles = StyleSheet.create({
     left: -9,
     right: -9,
     bottom: -9,
-    borderRadius: 29,
-    backgroundColor: 'rgba(255, 197, 64, 0.2)',
+    // borderRadius: 100,
+    // backgroundColor: '#FFFFFF',
     zIndex: 1,
   },
   title: {
@@ -702,10 +798,59 @@ const styles = StyleSheet.create({
   passwordToggle: {
     padding: 8,
   },
+  selectContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    height: 52,
+    marginBottom: 16,
+    justifyContent: 'space-between',
+  },
+  selectText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+  },
+  selectPlaceholder: {
+    color: '#666',
+  },
   picker: {
     flex: 1,
-    color: '#666',
-    // height: '100%',
+    color: '#333',
+    fontSize: 16,
+    height: 52,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    maxHeight: height * 0.6,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  modalPicker: {
+    height: 200,
   },
   fieldError: {
     color: '#ff4444',

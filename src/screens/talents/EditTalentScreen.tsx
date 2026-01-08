@@ -8,8 +8,10 @@ import {
   Alert,
   Image,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
+import { fetchAllTalents } from '../../store/slices/talentsSlice';
 import { updateTalent } from '../../store/slices/talentsSlice';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -38,14 +40,17 @@ export default function EditTalentScreen() {
   const [existingFiles, setExistingFiles] = useState<string[]>(talent.files || []);
 
   const talentTitles = [
-    'Music', 'Research', 'Design', 'Writing', 'Development', 
-    'Art', 'Photography', 'Video', 'Media', 'Marketing', 
-    'Consulting', 'Tutoring', 'Cooking', 'Fitness', 'Language'
+    'DJ & Music Production', 'Graphic Design Mastery', 'Creative Writing', 'Video Editing Pro', 
+    'Web Development', 'Digital Art & Illustration', 'Photography Excellence', 'Content Creation', 
+    'Social Media Marketing', 'Business Consulting', 'Academic Tutoring', 'Culinary Arts', 
+    'Fitness Coaching', 'Language Translation', 'Music Performance', '3D Animation', 
+    'UI/UX Design', 'Podcast Production', 'Event Planning', 'Fashion Design'
   ];
 
   const talentCategories = [
-    'Artwork', 'STEM', 'Creative', 'Academic', 'Technology',
-    'Business', 'Health', 'Education', 'Entertainment', 'Other'
+    'Music & Audio', 'Visual Arts', 'Creative Design', 'Technology & Development', 
+    'Business & Consulting', 'Health & Wellness', 'Education & Learning', 'Entertainment', 
+    'Media & Content', 'Other'
   ];
 
   const handleInputChange = (field: string, value: string) => {
@@ -95,15 +100,15 @@ export default function EditTalentScreen() {
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
-      Alert.alert('Error', 'Please enter a title for your talent');
+      showToast('Please enter a title for your talent', 'error');
       return;
     }
     if (!formData.category.trim()) {
-      Alert.alert('Error', 'Please select a category for your talent');
+      showToast('Please select a category for your talent', 'error');
       return;
     }
     if (!formData.description.trim()) {
-      Alert.alert('Error', 'Please enter a description for your talent');
+      showToast('Please enter a description for your talent', 'error');
       return;
     }
 
@@ -115,11 +120,15 @@ export default function EditTalentScreen() {
         files: selectedFiles,
       })).unwrap();
       
-      Alert.alert('Success', 'Talent updated successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
+      // Refresh the talents list to ensure latest data
+      await dispatch(fetchAllTalents());
+      
+      showToast('Talent updated successfully!', 'success', {
+        text: 'OK',
+        onPress: () => navigation.goBack()
+      });
     } catch (error) {
-      Alert.alert('Error', 'Failed to update talent. Please try again.');
+      showToast('Failed to update talent. Please try again.', 'error');
     }
   };
 
@@ -141,7 +150,7 @@ export default function EditTalentScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#8F1A27" />
@@ -151,16 +160,18 @@ export default function EditTalentScreen() {
       </View>
 
       {error && (
+        <View style={styles.errorContainer}>
         <AlertComponent variant="destructive" style={styles.errorAlert}>
           <AlertDescription>{error}</AlertDescription>
         </AlertComponent>
+        </View>
       )}
 
-      <Card style={styles.formCard}>
-        <CardHeader>
-          <CardTitle style={styles.cardTitle}>Talent Information</CardTitle>
-        </CardHeader>
-        <CardContent style={styles.cardContent}>
+      <View style={styles.formCard}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Talent Information</Text>
+        </View>
+        <View style={styles.cardContent}>
           {/* Title */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Title *</Text>
@@ -170,14 +181,26 @@ export default function EditTalentScreen() {
               onChangeText={(value) => handleInputChange('title', value)}
               style={styles.input}
             />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsLabel}>Quick suggestions:</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              style={styles.suggestionsContainer}
+              contentContainerStyle={styles.suggestionsContent}
+            >
               {talentTitles.map((title) => (
                 <TouchableOpacity
                   key={title}
-                  style={styles.suggestionButton}
+                  style={[
+                    styles.suggestionButton,
+                    formData.title === title && styles.suggestionButtonActive
+                  ]}
                   onPress={() => handleInputChange('title', title)}
                 >
-                  <Text style={styles.suggestionText}>{title}</Text>
+                  <Text style={[
+                    styles.suggestionText,
+                    formData.title === title && styles.suggestionTextActive
+                  ]}>{title}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -192,14 +215,26 @@ export default function EditTalentScreen() {
               onChangeText={(value) => handleInputChange('category', value)}
               style={styles.input}
             />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsLabel}>Quick suggestions:</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              style={styles.suggestionsContainer}
+              contentContainerStyle={styles.suggestionsContent}
+            >
               {talentCategories.map((category) => (
                 <TouchableOpacity
                   key={category}
-                  style={styles.suggestionButton}
+                  style={[
+                    styles.suggestionButton,
+                    formData.category === category && styles.suggestionButtonActive
+                  ]}
                   onPress={() => handleInputChange('category', category)}
                 >
-                  <Text style={styles.suggestionText}>{category}</Text>
+                  <Text style={[
+                    styles.suggestionText,
+                    formData.category === category && styles.suggestionTextActive
+                  ]}>{category}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -223,6 +258,7 @@ export default function EditTalentScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Current Files</Text>
               <Text style={styles.subLabel}>These files will be kept unless removed</Text>
+              <View style={styles.filesList}>
               {existingFiles.map((file, index) => (
                 <View key={index} style={styles.fileItem}>
                   {isImageFile(file) ? (
@@ -232,7 +268,9 @@ export default function EditTalentScreen() {
                       resizeMode="cover"
                     />
                   ) : (
-                    <Text style={styles.fileIcon}>📄</Text>
+                      <View style={styles.fileIconContainer}>
+                        <Ionicons name="document-outline" size={20} color="#6b7280" />
+                      </View>
                   )}
                   <Text style={styles.fileName} numberOfLines={1}>
                     {file.split('/').pop()}
@@ -241,10 +279,11 @@ export default function EditTalentScreen() {
                     style={styles.removeFileButton}
                     onPress={() => removeExistingFile(index)}
                   >
-                    <Ionicons name="trash-outline" size={16} color="#dc2626" />
+                      <Ionicons name="trash-outline" size={18} color="#dc2626" />
                   </TouchableOpacity>
                 </View>
               ))}
+              </View>
             </View>
           )}
 
@@ -256,22 +295,31 @@ export default function EditTalentScreen() {
             <View style={styles.uploadButtons}>
               <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
                 <Ionicons name="image-outline" size={20} color="#8F1A27" />
-                <Text style={styles.uploadButtonText}>Add Images/Videos</Text>
+                <Text style={styles.uploadButtonText}>Images/Videos</Text>
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.uploadButton} onPress={pickDocument}>
                 <Ionicons name="document-text-outline" size={20} color="#8F1A27" />
-                <Text style={styles.uploadButtonText}>Add Documents</Text>
+                <Text style={styles.uploadButtonText}>Documents</Text>
               </TouchableOpacity>
             </View>
 
             {/* Selected New Files */}
             {selectedFiles.length > 0 && (
               <View style={styles.filesContainer}>
-                <Text style={styles.filesTitle}>New Files:</Text>
+                <Text style={styles.filesTitle}>New Files ({selectedFiles.length}):</Text>
+                <View style={styles.filesList}>
                 {selectedFiles.map((file, index) => (
                   <View key={index} style={styles.fileItem}>
-                    <Text style={styles.fileIcon}>{getFileIcon(file)}</Text>
+                      <View style={styles.fileIconContainer}>
+                        {file.type === 'video' ? (
+                          <Ionicons name="videocam-outline" size={20} color="#6b7280" />
+                        ) : file.type === 'document' ? (
+                          <Ionicons name="document-outline" size={20} color="#6b7280" />
+                        ) : (
+                          <Ionicons name="image-outline" size={20} color="#6b7280" />
+                        )}
+                      </View>
                     <Text style={styles.fileName} numberOfLines={1}>
                       {file.name}
                     </Text>
@@ -279,32 +327,33 @@ export default function EditTalentScreen() {
                       style={styles.removeFileButton}
                       onPress={() => removeNewFile(index)}
                     >
-                      <Ionicons name="close-outline" size={16} color="#dc2626" />
+                        <Ionicons name="close-circle-outline" size={20} color="#dc2626" />
                     </TouchableOpacity>
                   </View>
                 ))}
+                </View>
               </View>
             )}
           </View>
-        </CardContent>
-      </Card>
+        </View>
+      </View>
 
       {/* Submit Button */}
       <View style={styles.submitContainer}>
-        <Button
+        <TouchableOpacity
           onPress={handleSubmit}
           disabled={isLoading}
-          style={styles.submitButton}
+          style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
         >
           {isLoading ? (
-            <Ionicons name="refresh-outline" size={20} color="white" />
+            <Ionicons name="refresh" size={20} color="white" />
           ) : (
-            <Ionicons name="add-outline" size={20} color="white" />
+            <Ionicons name="checkmark-circle" size={20} color="white" />
           )}
           <Text style={styles.submitButtonText}>
-            {isLoading ? 'Updating Talent...' : 'Update Talent'}
+            {isLoading ? 'Updating...' : 'Update Talent'}
           </Text>
-        </Button>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -319,100 +368,142 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
   backButton: {
     padding: 8,
+    marginLeft: -8,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#8F1A27',
   },
   placeholder: {
     width: 40,
   },
+  errorContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
   errorAlert: {
-    margin: 20,
+    margin: 0,
   },
   formCard: {
-    margin: 20,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
     backgroundColor: 'white',
-    borderRadius: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  cardHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '700',
     color: '#1f2937',
   },
   cardContent: {
-    padding: 20,
+    padding: 16,
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   label: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
   },
   subLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#6b7280',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   input: {
     backgroundColor: '#f9fafb',
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#e5e7eb',
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
+    paddingVertical: 10,
+    fontSize: 15,
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
+    paddingTop: 10,
+  },
+  suggestionsLabel: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 8,
+    marginBottom: 6,
+    fontWeight: '500',
   },
   suggestionsContainer: {
-    marginTop: 8,
+    marginTop: 4,
+  },
+  suggestionsContent: {
+    paddingRight: 16,
   },
   suggestionButton: {
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
     marginRight: 8,
-    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  suggestionButtonActive: {
+    backgroundColor: '#8F1A27',
+    borderColor: '#8F1A27',
   },
   suggestionText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#374151',
+    fontWeight: '500',
+  },
+  suggestionTextActive: {
+    color: '#ffffff',
+    fontWeight: '600',
   },
   uploadButtons: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 12,
   },
   uploadButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#f9fafb',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    borderStyle: 'dashed',
   },
   uploadButtonText: {
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: 6,
+    fontSize: 13,
     color: '#374151',
     fontWeight: '500',
   },
@@ -420,47 +511,68 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   filesTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
+  },
+  filesList: {
+    gap: 8,
   },
   fileItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f9fafb',
-    padding: 12,
+    padding: 10,
     borderRadius: 8,
-    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   fileThumbnail: {
-    width: 40,
-    height: 40,
-    borderRadius: 4,
-    marginRight: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    marginRight: 10,
   },
-  fileIcon: {
-    fontSize: 20,
-    marginRight: 8,
+  fileIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
   },
   fileName: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     color: '#374151',
+    fontWeight: '500',
   },
   removeFileButton: {
     padding: 4,
+    marginLeft: 8,
   },
   submitContainer: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
   },
   submitButton: {
     backgroundColor: '#8F1A27',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
+    shadowColor: '#8F1A27',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
   submitButtonText: {
     color: 'white',

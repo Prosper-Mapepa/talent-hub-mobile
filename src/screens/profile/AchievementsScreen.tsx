@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchStudentProfile, addAchievement, updateAchievement, deleteAchievement } from '../../store/slices/studentsSlice';
@@ -46,7 +47,7 @@ const AchievementsScreen: React.FC = () => {
 
   const handleSaveAchievement = async () => {
     if (!achievementForm.title.trim()) {
-      Alert.alert('Error', 'Achievement title cannot be empty.');
+      showToast('Achievement title cannot be empty.', 'error');
       return;
     }
 
@@ -58,7 +59,7 @@ const AchievementsScreen: React.FC = () => {
           description: achievementForm.description,
           date: achievementForm.date,
         })).unwrap();
-        Alert.alert('Success', 'Achievement updated successfully!');
+        showToast('Achievement updated successfully!', 'success');
       } else {
         await dispatch(addAchievement({
           achievementData: {
@@ -68,36 +69,32 @@ const AchievementsScreen: React.FC = () => {
           },
           files: selectedFiles
         })).unwrap();
-        Alert.alert('Success', 'Achievement added successfully!');
+        showToast('Achievement added successfully!', 'success');
       }
       setShowAchievementModal(false);
       setEditingAchievement(null);
       setAchievementForm({ title: '', description: '', date: '' });
       setSelectedFiles([]);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to save achievement');
+      showToast(error.message || 'Failed to save achievement', 'error');
     }
   };
 
   const handleDeleteAchievement = (achievement: Achievement) => {
-    Alert.alert(
-      'Delete Achievement',
+    showToast(
       'Are you sure you want to delete this achievement?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await dispatch(deleteAchievement(achievement.id)).unwrap();
-              Alert.alert('Success', 'Achievement deleted successfully!');
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete achievement');
-            }
-          },
+      'warning',
+      {
+        text: 'Delete',
+        onPress: async () => {
+          try {
+            await dispatch(deleteAchievement(achievement.id)).unwrap();
+            showToast('Achievement deleted successfully!', 'success');
+          } catch (error: any) {
+            showToast(error.message || 'Failed to delete achievement', 'error');
+          }
         },
-      ]
+      }
     );
   };
 

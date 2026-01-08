@@ -4,6 +4,7 @@ import { store } from './src/store';
 import AppNavigator from './src/navigation';
 import { initializeAuth } from './src/store/slices/authSlice';
 import { StatusBar } from 'expo-status-bar';
+import { ToastManager } from './src/components/ui/toast';
 
 export default function App() {
   useEffect(() => {
@@ -15,6 +16,7 @@ export default function App() {
     <Provider store={store}>
       <StatusBar style="light" />
       <AppNavigator />
+      <ToastManager />
     </Provider>
   );
 }

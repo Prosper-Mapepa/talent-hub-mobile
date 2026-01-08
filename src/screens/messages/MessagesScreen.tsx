@@ -16,6 +16,9 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchConversations, fetchMessages, sendMessage, createConversation } from '../../store/slices/messagesSlice';
@@ -28,7 +31,6 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Alert as AlertComponent, AlertDescription } from '../../components/ui/alert';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,6 +38,7 @@ const MessagesScreen: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useAppSelector(state => state.auth);
   const { conversations, messages, isLoading, error } = useAppSelector(state => state.messages);
+  const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [newMessage, setNewMessage] = useState('');
@@ -44,24 +47,19 @@ const MessagesScreen: React.FC = () => {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [filteredConversations, setFilteredConversations] = useState<Conversation[]>([]);
   const [studentInfo, setStudentInfo] = useState<any>(null);
   const [chatLoadError, setChatLoadError] = useState<string | null>(null);
+  const [chatHeaderImageError, setChatHeaderImageError] = useState(false);
   const messagesListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    console.log('Conversations updated:', conversations?.length || 0, conversations);
+    // Normalize conversations to ensure it's always an array
+    const normalizedConversations = Array.isArray(conversations) ? conversations : [];
+    console.log('Conversations updated:', normalizedConversations.length, normalizedConversations);
     
-    // Check if conversations is an object with data property
-    if (conversations && typeof conversations === 'object' && 'data' in conversations) {
-      console.log('Conversations has data property:', conversations.data);
-    }
-    
-    // Check if conversations is an array
-    if (Array.isArray(conversations)) {
-      console.log('Conversations is an array with length:', conversations.length);
-      if (conversations.length > 0) {
-        console.log('First conversation:', conversations[0]);
-      }
+    if (normalizedConversations.length > 0) {
+      console.log('First conversation:', normalizedConversations[0]);
     }
   }, [conversations]);
 
@@ -89,16 +87,34 @@ const MessagesScreen: React.FC = () => {
   useEffect(() => {
     if (searchTerm.trim() === '') {
       setFilteredUsers([]);
+      setFilteredConversations([]);
     } else {
-      setFilteredUsers(
-        allUsers.filter(u =>
-          u.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          u.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          u.email?.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      );
+      const searchLower = searchTerm.toLowerCase();
+      
+      // Filter users
+      const filtered = allUsers.filter(u => {
+        const firstName = u.firstName?.toLowerCase() || '';
+        const lastName = u.lastName?.toLowerCase() || '';
+        const email = u.email?.toLowerCase() || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        return firstName.includes(searchLower) ||
+               lastName.includes(searchLower) ||
+               email.includes(searchLower) ||
+               fullName.includes(searchLower);
+      });
+      setFilteredUsers(filtered);
+      
+      // Filter conversations (deduplicated)
+      const normalizedConversations = Array.isArray(conversations) ? conversations : [];
+      const deduplicatedConvs = deduplicateConversations(normalizedConversations);
+      const filteredConvs = deduplicatedConvs.filter(conv => {
+        const participantName = getParticipantName(conv, user?.id || '').toLowerCase();
+        const lastMsg = conv.lastMessage?.content?.toLowerCase() || '';
+        return participantName.includes(searchLower) || lastMsg.includes(searchLower);
+      });
+      setFilteredConversations(filteredConvs);
     }
-  }, [searchTerm, allUsers]);
+  }, [searchTerm, allUsers, conversations, user?.id]);
 
   const loadAllUsers = async () => {
     try {
@@ -114,11 +130,87 @@ const MessagesScreen: React.FC = () => {
       console.log('Loaded users for search:', filteredUsers.length);
     } catch (error: any) {
       console.error('Failed to load users:', error);
-      // Don't show error if it's a 401 (unauthorized) - user probably logged out
-      if (error?.response?.status !== 401) {
+      // Don't show error if it's a 401 (unauthorized) or 403 (forbidden) - expected for some roles
+      if (error?.response?.status !== 401 && error?.response?.status !== 403) {
         console.error('Non-auth error loading users:', error);
+        // Only show toast for unexpected errors
+        showToast('Failed to load users. Some users may not be available.', 'warning');
+      }
+      // Set empty array on error so search still works with existing conversations
+      setAllUsers([]);
+    }
+  };
+
+  // Deduplicate conversations by participant pair - keep only the most recent one
+  const deduplicateConversations = (conversations: Conversation[]): Conversation[] => {
+    if (!Array.isArray(conversations) || conversations.length === 0) {
+      return [];
+    }
+
+    if (!user?.id) {
+      return conversations;
+    }
+
+    // Group conversations by participant pair (excluding current user)
+    const conversationMap = new Map<string, Conversation>();
+
+    for (const conv of conversations) {
+      if (!conv.participants || !Array.isArray(conv.participants)) {
+        continue;
+      }
+
+      // Get the other participant (not the current user)
+      const otherParticipant = conv.participants.find(p => p.id !== user.id);
+      if (!otherParticipant) {
+        continue;
+      }
+
+      // Create a unique key for this participant pair
+      const participantKey = otherParticipant.id;
+
+      // Check if we already have a conversation with this participant
+      const existingConv = conversationMap.get(participantKey);
+
+      if (!existingConv) {
+        // First conversation with this participant
+        conversationMap.set(participantKey, conv);
+      } else {
+        // Compare timestamps to keep the most recent one
+        const existingTime = existingConv.updatedAt 
+          ? new Date(existingConv.updatedAt).getTime() 
+          : existingConv.lastMessage?.createdAt 
+            ? new Date(existingConv.lastMessage.createdAt).getTime() 
+            : 0;
+        
+        const currentTime = conv.updatedAt 
+          ? new Date(conv.updatedAt).getTime() 
+          : conv.lastMessage?.createdAt 
+            ? new Date(conv.lastMessage.createdAt).getTime() 
+            : 0;
+
+        if (currentTime > existingTime) {
+          // Current conversation is more recent, replace it
+          conversationMap.set(participantKey, conv);
+        }
       }
     }
+
+    // Return deduplicated conversations as an array, sorted by most recent
+    return Array.from(conversationMap.values()).sort((a, b) => {
+      const timeA = a.updatedAt 
+        ? new Date(a.updatedAt).getTime() 
+        : a.lastMessage?.createdAt 
+          ? new Date(a.lastMessage.createdAt).getTime() 
+          : 0;
+      
+      const timeB = b.updatedAt 
+        ? new Date(b.updatedAt).getTime() 
+        : b.lastMessage?.createdAt 
+          ? new Date(b.lastMessage.createdAt).getTime() 
+          : 0;
+
+      return timeB - timeA; // Most recent first
+    });
   };
 
   const onRefresh = async () => {
@@ -129,7 +221,7 @@ const MessagesScreen: React.FC = () => {
       console.log('Conversations refreshed successfully');
     } catch (error) {
       console.error('Failed to refresh conversations:', error);
-      Alert.alert('Error', 'Failed to refresh conversations');
+      showToast('Failed to refresh conversations', 'error');
     } finally {
     setRefreshing(false);
     }
@@ -147,10 +239,16 @@ const MessagesScreen: React.FC = () => {
         }
       })).unwrap();
       setNewMessage('');
-      // Refresh messages
-      dispatch(fetchMessages(selectedConversation.id));
-    } catch (error) {
-      Alert.alert('Error', 'Failed to send message');
+      // Refresh messages and conversations list
+      await dispatch(fetchMessages(selectedConversation.id));
+      await dispatch(fetchConversations());
+      // Scroll to bottom after sending
+      setTimeout(() => {
+        messagesListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      showToast(error?.message || 'Failed to send message', 'error');
     } finally {
       setIsSending(false);
     }
@@ -163,14 +261,28 @@ const MessagesScreen: React.FC = () => {
       try {
         const newConversation = await dispatch(createConversation([user.id, otherUserId])).unwrap();
         conv = newConversation;
-      } catch (error) {
-        Alert.alert('Error', 'Failed to create conversation');
+        // Refresh conversations list after creating
+        await dispatch(fetchConversations());
+      } catch (error: any) {
+        console.error('Error creating conversation:', error);
+        showToast(error?.message || 'Failed to create conversation', 'error');
         return;
       }
     }
     if (conv) {
       setSelectedConversation(conv);
-      dispatch(fetchMessages(conv.id));
+      setChatLoadError(null);
+      setChatHeaderImageError(false); // Reset image error when opening new chat
+      try {
+        await dispatch(fetchMessages(conv.id)).unwrap();
+        // Scroll to bottom when messages load
+        setTimeout(() => {
+          messagesListRef.current?.scrollToEnd({ animated: false });
+        }, 100);
+      } catch (error: any) {
+        console.error('Error loading messages:', error);
+        setChatLoadError('Failed to load messages');
+      }
       setShowChatModal(true);
     }
   };
@@ -192,15 +304,34 @@ const MessagesScreen: React.FC = () => {
     
     // Handle different participant object structures
     if (otherParticipant.role === 'student') {
+      // Check student relationship first (most reliable)
+      if (otherParticipant.student) {
+        const firstName = otherParticipant.student.firstName || '';
+        const lastName = otherParticipant.student.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        if (fullName) return fullName;
+      }
+      
+      // Fallback to direct firstName/lastName on participant
       const firstName = otherParticipant.firstName || '';
       const lastName = otherParticipant.lastName || '';
       const fullName = `${firstName} ${lastName}`.trim();
-      return fullName || otherParticipant.email || 'Student User';
+      if (fullName) return fullName;
+      
+      // Last resort: show email or a default name
+      if (otherParticipant.email) {
+        // Extract name from email if possible
+        const emailName = otherParticipant.email.split('@')[0];
+        return emailName.charAt(0).toUpperCase() + emailName.slice(1);
+      }
+      return 'Student User';
     } else if (otherParticipant.role === 'business') {
-      return otherParticipant.business?.businessName || otherParticipant.email || 'Business User';
+      const businessName = otherParticipant.business?.businessName;
+      if (businessName) return businessName;
+      return 'Business User';
     }
     
-    return otherParticipant.email || 'Unknown User';
+    return 'Unknown User';
   };
 
   const getParticipantInitials = (conversation: Conversation, currentUserId: string) => {
@@ -214,21 +345,73 @@ const MessagesScreen: React.FC = () => {
     }
     
     if (otherParticipant.role === 'student') {
+      // Check student relationship first
+      if (otherParticipant.student) {
+        const firstName = otherParticipant.student.firstName || '';
+        const lastName = otherParticipant.student.lastName || '';
+        if (firstName && lastName) {
+          return `${firstName[0]}${lastName[0]}`.toUpperCase();
+        }
+        if (firstName) {
+          return firstName[0].toUpperCase();
+        }
+      }
+      
+      // Fallback to direct firstName/lastName on participant
       const firstName = otherParticipant.firstName || '';
       const lastName = otherParticipant.lastName || '';
       if (firstName && lastName) {
         return `${firstName[0]}${lastName[0]}`.toUpperCase();
       }
-      return otherParticipant.email ? otherParticipant.email[0].toUpperCase() : 'S';
+      if (firstName) {
+        return firstName[0].toUpperCase();
+      }
+      
+      return 'S';
     } else if (otherParticipant.role === 'business') {
       const businessName = otherParticipant.business?.businessName;
       if (businessName) {
         return businessName[0].toUpperCase();
       }
-      return otherParticipant.email ? otherParticipant.email[0].toUpperCase() : 'B';
+      return 'B';
     }
     
     return 'U';
+  };
+
+  const getParticipantProfileImage = (conversation: Conversation, currentUserId: string): string | null => {
+    if (!conversation.participants || !Array.isArray(conversation.participants)) {
+      return null;
+    }
+    
+    const otherParticipant = conversation.participants.find(p => p.id !== currentUserId);
+    if (!otherParticipant) {
+      return null;
+    }
+    
+    // Debug logging
+    if (__DEV__) {
+      console.log('Participant data:', {
+        id: otherParticipant.id,
+        role: otherParticipant.role,
+        student: otherParticipant.student,
+        business: otherParticipant.business,
+        hasStudentProfileImage: !!otherParticipant.student?.profileImage,
+        hasBusinessLogo: !!otherParticipant.business?.logo,
+      });
+    }
+    
+    // Check if participant has a student record with profileImage
+    if (otherParticipant.role === 'student' && otherParticipant.student?.profileImage) {
+      return otherParticipant.student.profileImage;
+    }
+    
+    // For businesses, check if they have a logo
+    if (otherParticipant.role === 'business' && otherParticipant.business?.logo) {
+      return otherParticipant.business.logo;
+    }
+    
+    return null;
   };
 
   const formatTime = (timestamp: string) => {
@@ -255,17 +438,50 @@ const MessagesScreen: React.FC = () => {
 
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
-    if (filePath.startsWith('http')) return filePath;
-    return `${process.env.API_BASE_URL || 'http://35.32.69.18:3001'}${filePath}`;
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+    
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://192.168.0.106:3001';
+    let cleanPath = filePath;
+    
+    // Remove leading slash if present
+    if (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.substring(1);
+    }
+    
+    // If path already includes uploads/, use it as is
+    if (cleanPath.startsWith('uploads/')) {
+      return `${apiBaseUrl}/${cleanPath}`;
+    }
+    
+    // Default to profiles directory
+    return `${apiBaseUrl}/uploads/profiles/${cleanPath}`;
   };
 
-  const renderConversationCard = ({ item: conversation }: { item: Conversation }) => {
+  const parseMessageContent = (content: string) => {
+    const talentMatch = content.match(/\[About talent:\s*(.+?)\]/);
+    if (talentMatch) {
+      const talentTitle = talentMatch[1].trim();
+      const messageContent = content.replace(/\[About talent:.+?\]\n*\n*/g, '').trim();
+      return { talentTitle, messageContent };
+    }
+    return { talentTitle: null, messageContent: content };
+  };
+
+  const ConversationCard = React.memo(({ conversation }: { conversation: Conversation }) => {
     const otherParticipant = getOtherParticipant(conversation);
     const participantName = getParticipantName(conversation, user?.id || '');
     const participantInitials = getParticipantInitials(conversation, user?.id || '');
+    const profileImage = getParticipantProfileImage(conversation, user?.id || '');
     const lastMessage = conversation.lastMessage;
+    const [imageError, setImageError] = useState(false);
 
-    console.log('Rendering conversation:', conversation.id, participantName, otherParticipant);
+    // Parse message content for talent context
+    const messageParse = lastMessage ? parseMessageContent(lastMessage.content) : null;
+
+    // Debug logging
+    if (__DEV__ && profileImage) {
+      console.log(`Profile image for ${participantName}:`, profileImage, 'Full URL:', getFileUrl(profileImage));
+    }
 
     return (
       <TouchableOpacity
@@ -274,19 +490,41 @@ const MessagesScreen: React.FC = () => {
           console.log('Opening conversation:', conversation.id);
           openChat(conversation);
         }}
+        activeOpacity={0.7}
       >
         <View style={styles.conversationHeader}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{participantInitials}</Text>
+              {profileImage && !imageError ? (
+                <Image
+                  source={{ uri: getFileUrl(profileImage) }}
+                  style={styles.avatarImage}
+                  onError={() => setImageError(true)}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={styles.avatarText}>{participantInitials}</Text>
+              )}
             </View>
           </View>
           <View style={styles.conversationInfo}>
-            <Text style={styles.participantName}>{participantName}</Text>
+            <Text style={styles.participantName} numberOfLines={1}>{participantName}</Text>
             {lastMessage ? (
-              <Text style={styles.lastMessage} numberOfLines={1}>
-                {lastMessage.content}
-              </Text>
+              <View style={styles.messagePreviewContainer}>
+                {messageParse?.talentTitle && (
+                  <View style={styles.talentBadge}>
+                    <Ionicons name="star" size={12} color="#8F1A27" />
+                    <Text style={styles.talentBadgeText} numberOfLines={1}>
+                      {messageParse.talentTitle}
+                    </Text>
+                  </View>
+                )}
+                {messageParse?.messageContent ? (
+                  <Text style={styles.lastMessage} numberOfLines={messageParse.talentTitle ? 1 : 2}>
+                    {messageParse.messageContent}
+                  </Text>
+                ) : null}
+              </View>
             ) : (
               <Text style={styles.lastMessage} numberOfLines={1}>
                 Click to start messaging
@@ -294,21 +532,20 @@ const MessagesScreen: React.FC = () => {
             )}
           </View>
           <View style={styles.conversationMeta}>
-            {lastMessage && (
+            {(lastMessage || conversation.updatedAt) && (
               <Text style={styles.lastMessageTime}>
-                {formatTime(lastMessage.createdAt)}
-              </Text>
-            )}
-            {conversation.updatedAt && (
-              <Text style={styles.lastMessageTime}>
-                {formatTime(conversation.updatedAt)}
+                {formatTime(lastMessage?.createdAt || conversation.updatedAt)}
               </Text>
             )}
           </View>
         </View>
       </TouchableOpacity>
     );
-  };
+  });
+
+  const renderConversationCard = ({ item: conversation }: { item: Conversation }) => (
+    <ConversationCard conversation={conversation} key={conversation.id} />
+  );
 
   const renderMessage = ({ item: message }: { item: Message }) => {
     const isMyMessage = message.senderId === user?.id;
@@ -345,7 +582,12 @@ const MessagesScreen: React.FC = () => {
       animationType="slide"
       onRequestClose={() => setShowChatModal(false)}
     >
-      <View style={styles.chatContainer}>
+      <LinearGradient
+        colors={['#FAFBFC', '#FFFFFF', '#F5F7FA']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={styles.chatContainer}
+      >
         {/* Chat Header */}
         <View style={styles.chatHeader}>
           <TouchableOpacity
@@ -355,39 +597,61 @@ const MessagesScreen: React.FC = () => {
             <Ionicons name="arrow-back" size={24} color={COLORS.maroon} />
           </TouchableOpacity>
           <View style={styles.chatHeaderInfo}>
-            {selectedConversation && (
-              <>
-                <View style={styles.chatHeaderAvatar}>
-                  <Text style={styles.chatHeaderAvatarText}>
-                    {getParticipantInitials(selectedConversation, user?.id || '')}
-                  </Text>
-                </View>
-                <View style={styles.chatHeaderText}>
-            <Text style={styles.chatHeaderName}>
-                    {getParticipantName(selectedConversation, user?.id || '')}
-            </Text>
-                  <Text style={styles.chatHeaderSubtitle}>Online</Text>
-                </View>
-              </>
-            )}
+            {selectedConversation && (() => {
+              const participantName = getParticipantName(selectedConversation, user?.id || '');
+              const profileImage = getParticipantProfileImage(selectedConversation, user?.id || '');
+              const initials = getParticipantInitials(selectedConversation, user?.id || '');
+              
+              return (
+                <>
+                  <View style={styles.chatHeaderAvatar}>
+                    {profileImage && !chatHeaderImageError ? (
+                      <Image
+                        source={{ uri: getFileUrl(profileImage) }}
+                        style={styles.chatHeaderAvatarImage}
+                        onError={() => {
+                          console.log('Profile image error:', profileImage);
+                          setChatHeaderImageError(true);
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.chatHeaderAvatarFallback}>
+                        <Text style={styles.chatHeaderAvatarText}>{initials}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.chatHeaderText}>
+                    <Text style={styles.chatHeaderName} numberOfLines={1}>
+                      {participantName}
+                    </Text>
+                    <Text style={styles.chatHeaderSubtitle}>Active now</Text>
+                  </View>
+                </>
+              );
+            })()}
           </View>
         </View>
 
         {/* Messages */}
         <FlatList
           ref={messagesListRef}
-          data={selectedConversation ? (messages[selectedConversation.id] || []) : []}
+          data={selectedConversation ? (messages[selectedConversation.id] || []).slice().sort((a, b) => {
+            const dateA = new Date(a.createdAt).getTime();
+            const dateB = new Date(b.createdAt).getTime();
+            return dateA - dateB; // Sort ascending (oldest first)
+          }) : []}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
           style={styles.messagesList}
-          inverted
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.messagesListContent}
         />
 
         {/* Message Input */}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.inputContainer}
+          style={[styles.inputContainer, { paddingBottom: Math.max(24, insets.bottom + 8) }]}
         >
           <View style={styles.inputWrapper}>
             <TextInput
@@ -414,7 +678,7 @@ const MessagesScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      </View>
+      </LinearGradient>
     </Modal>
   );
 
@@ -480,7 +744,7 @@ const MessagesScreen: React.FC = () => {
             <Text style={styles.title}>Messages</Text>
             <Text style={styles.subtitle}>Connect with students and businesses</Text>
           </View>
-          <View style={styles.headerActions}>
+          {/* <View style={styles.headerActions}>
             <TouchableOpacity 
               style={styles.headerButton} 
               onPress={() => {
@@ -493,7 +757,7 @@ const MessagesScreen: React.FC = () => {
             >
               <Ionicons name="add" size={20} color="#6A0032" />
             </TouchableOpacity>
-          </View>
+          </View> */}
         </View>
       </LinearGradient>
 
@@ -501,156 +765,147 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <Ionicons name="search" size={20} color="#6b7280" style={styles.searchIcon} />
-          <Input
-            placeholder="Search users..."
+          <TextInput
+            placeholder="Search conversations or users..."
+            placeholderTextColor="#9ca3af"
             value={searchTerm}
-            onChangeText={setSearchTerm}
+            onChangeText={(text) => {
+              setSearchTerm(text);
+              if (text.trim() && allUsers.length === 0) {
+                loadAllUsers();
+              }
+            }}
             onFocus={() => {
-              console.log('Search input focused, loading all users');
-              loadAllUsers();
+              if (allUsers.length === 0) {
+                loadAllUsers();
+              }
             }}
             style={styles.searchInput}
-        />
+          />
+          {searchTerm.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchTerm('');
+                setFilteredUsers([]);
+                setFilteredConversations([]);
+              }}
+              style={styles.clearSearchButton}
+            >
+              <Ionicons name="close-circle" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
-      {/* User Search Results */}
-      {(searchTerm.trim() || filteredUsers.length > 0) && (
+      {/* Search Results */}
+      {searchTerm.trim() && (
         <View style={styles.searchResults}>
-          <View style={styles.searchResultsHeader}>
-            <Text style={styles.searchResultsTitle}>
-              {searchTerm.trim() ? 'Search Results' : 'All Users'}
-            </Text>
-            {!searchTerm.trim() && (
-              <TouchableOpacity
-                style={styles.closeSearchButton}
-                onPress={() => {
-                  setSearchTerm('');
-                  setFilteredUsers([]);
-                }}
-              >
-                <Ionicons name="close" size={20} color="#6b7280" />
-              </TouchableOpacity>
-            )}
-          </View>
+          {/* Filtered Conversations */}
+          {filteredConversations.length > 0 && (
+            <View style={styles.searchSection}>
+              <Text style={styles.searchSectionTitle}>
+                Conversations ({filteredConversations.length})
+              </Text>
+              <FlatList
+                data={filteredConversations}
+                keyExtractor={item => item.id}
+                style={styles.searchResultsList}
+                scrollEnabled={false}
+                renderItem={({ item }) => (
+                  <ConversationCard conversation={item} />
+                )}
+              />
+            </View>
+          )}
           
-          <FlatList
-            data={searchTerm.trim() ? filteredUsers : allUsers}
-            keyExtractor={item => `${item.role}-${item.id}`}
-            style={styles.searchResultsList}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.searchResultItem}
-                onPress={async () => {
-                  setSearchTerm('');
-                  setFilteredUsers([]);
-                  await openChat(null, item.id);
-                }}
-              >
-                <View style={styles.searchResultAvatar}>
-                  <Text style={styles.searchResultAvatarText}>
-                    {item.firstName ? item.firstName[0] : item.email?.[0] || 'U'}
-                  </Text>
-                </View>
-                <View style={styles.searchResultInfo}>
-                  <Text style={styles.searchResultName}>
-                    {item.firstName && item.lastName 
-                      ? `${item.firstName} ${item.lastName}`
-                      : item.email || 'Unknown User'
-                    }
-                  </Text>
-                  <Text style={styles.searchResultEmail}>{item.email}</Text>
-                  <Text style={styles.searchResultRole}>{item.role}</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-          />
+          {/* Filtered Users */}
+          {filteredUsers.length > 0 && (
+            <View style={styles.searchSection}>
+              <Text style={styles.searchSectionTitle}>
+                Users ({filteredUsers.length})
+              </Text>
+              <FlatList
+                data={filteredUsers}
+                keyExtractor={item => `${item.role}-${item.id}`}
+                style={styles.searchResultsList}
+                scrollEnabled={false}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.searchResultItem}
+                    onPress={async () => {
+                      setSearchTerm('');
+                      setFilteredUsers([]);
+                      setFilteredConversations([]);
+                      await openChat(null, item.id);
+                    }}
+                  >
+                    <View style={styles.searchResultAvatar}>
+                      <Text style={styles.searchResultAvatarText}>
+                        {item.firstName ? item.firstName[0].toUpperCase() : item.email?.[0].toUpperCase() || 'U'}
+                      </Text>
+                    </View>
+                    <View style={styles.searchResultInfo}>
+                      <Text style={styles.searchResultName} numberOfLines={1}>
+                        {item.firstName && item.lastName 
+                          ? `${item.firstName} ${item.lastName}`
+                          : item.email || 'Unknown User'
+                        }
+                      </Text>
+                      <Text style={styles.searchResultEmail} numberOfLines={1}>{item.email}</Text>
+                      <View style={styles.searchResultRoleBadge}>
+                        <Text style={styles.searchResultRole}>{item.role}</Text>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
+          
+          {/* No Results */}
+          {searchTerm.trim() && filteredConversations.length === 0 && filteredUsers.length === 0 && (
+            <View style={styles.noSearchResults}>
+              <Ionicons name="search-outline" size={48} color="#d1d5db" />
+              <Text style={styles.noSearchResultsText}>No results found</Text>
+              <Text style={styles.noSearchResultsSubtext}>
+                Try searching by name or email
+              </Text>
+            </View>
+          )}
         </View>
       )}
 
       {/* Conversations List */}
-      {isLoading ? (
+      {!searchTerm.trim() && (isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.maroon} />
           <Text style={styles.loadingText}>Loading conversations...</Text>
         </View>
-      ) : !conversations || conversations.length === 0 ? (
+      ) : !Array.isArray(conversations) || conversations.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="chatbubble-outline" size={64} color={COLORS.gray} />
-          <Text style={styles.emptyText}>No conversations yet</Text>
-          <Text style={styles.emptySubtext}>Start connecting with others to see messages here</Text>
-          
-          {/* Debug info - only show in development */}
-          {__DEV__ && (
-            <>
-              <Text style={styles.debugText}>User ID: {user?.id}</Text>
-              <Text style={styles.debugText}>Loading: {isLoading.toString()}</Text>
-              <Text style={styles.debugText}>Error: {error || 'None'}</Text>
-              <Text style={styles.debugText}>Conversations type: {typeof conversations}</Text>
-              <Text style={styles.debugText}>Conversations length: {conversations?.length || 'undefined'}</Text>
-            </>
-          )}
-          
-          <TouchableOpacity
-            style={styles.createConversationButton}
-            onPress={() => {
-              console.log('Opening user search from start conversation button');
-              setSearchTerm('');
-              setFilteredUsers([]);
-              // Load all users to show them immediately
-              loadAllUsers();
-            }}
-          >
-            <Text style={styles.createConversationButtonText}>Start a Conversation</Text>
-          </TouchableOpacity>
-          
-          {/* Alternative: Show all users directly */}
-          <TouchableOpacity
-            style={styles.showUsersButton}
-            onPress={() => {
-              console.log('Showing all users directly');
-              setSearchTerm('');
-              setFilteredUsers([]);
-              loadAllUsers();
-            }}
-          >
-            <Text style={styles.showUsersButtonText}>Browse All Users</Text>
-          </TouchableOpacity>
-          
-          {/* Test button for debugging */}
-          {__DEV__ && (
-            <TouchableOpacity
-              style={styles.testButton}
-              onPress={() => {
-                console.log('Manually triggering conversation fetch...');
-                dispatch(fetchConversations());
-              }}
-            >
-              <Text style={styles.testButtonText}>Test Fetch Conversations</Text>
-            </TouchableOpacity>
-          )}
+          <Ionicons name="chatbubble-outline" size={64} color="#d1d5db" />
+          <Text style={styles.emptyText}>No messages</Text>
         </View>
       ) : (
-        <>
-          {/* Debug info - only show in development */}
-          {__DEV__ && (
-            <View style={styles.debugContainer}>
-              <Text style={styles.debugText}>Found {conversations.length} conversations</Text>
-            </View>
-          )}
-          
-          <FlatList
-            data={conversations}
+        <FlatList
+            data={deduplicateConversations(Array.isArray(conversations) ? conversations : [])}
             renderItem={renderConversationCard}
             keyExtractor={(item) => item.id}
             style={styles.conversationsList}
+            contentContainerStyle={Array.isArray(conversations) && conversations.length === 0 ? styles.emptyListContainer : styles.conversationsListContent}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubble-outline" size={64} color="#d1d5db" />
+                <Text style={styles.emptyText}>No messages</Text>
+              </View>
+            }
           />
-        </>
-      )}
+      ))}
 
       {renderChatModal()}
     </View>
@@ -680,7 +935,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#FFFFFF',
     opacity: 0.9,
   },
@@ -689,18 +944,24 @@ const styles = StyleSheet.create({
   },
   conversationsList: {
     flex: 1,
-    paddingHorizontal: 20,
+  },
+  conversationsListContent: {
+    paddingTop: 8,
+    paddingBottom: 16,
   },
   conversationCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    marginHorizontal: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
   },
   conversationHeader: {
     flexDirection: 'row',
@@ -710,42 +971,73 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: COLORS.maroon,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#F3F4F6',
   },
   avatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 24,
+    borderRadius: 28,
   },
   avatarText: {
     color: COLORS.white,
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '600',
   },
   conversationInfo: {
     flex: 1,
+    marginLeft: 12,
+    justifyContent: 'center',
   },
   participantName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: '#111827',
     marginBottom: 4,
+  },
+  messagePreviewContainer: {
+    gap: 4,
+  },
+  talentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    marginBottom: 2,
+  },
+  talentBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8F1A27',
+    marginLeft: 4,
+    maxWidth: 150,
   },
   lastMessage: {
     fontSize: 14,
-    color: COLORS.gray,
+    color: '#6B7280',
+    lineHeight: 20,
   },
   conversationMeta: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   lastMessageTime: {
     fontSize: 12,
     color: '#9CA3AF',
+    fontWeight: '500',
   },
   loadingContainer: {
     flex: 1,
@@ -778,18 +1070,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: COLORS.gray,
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
+    fontWeight: '500',
+    color: '#6b7280',
+    marginTop: 16,
   },
   chatContainer: {
     flex: 1,
-    backgroundColor: COLORS.background,
   },
   chatHeader: {
     flexDirection: 'row',
@@ -798,26 +1084,40 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   backButton: {
     marginRight: 12,
   },
   chatHeaderInfo: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   chatHeaderName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
-    color: '#1F2937',
+    color: '#111827',
+    marginBottom: 2,
   },
   chatHeaderSubtitle: {
-    fontSize: 14,
-    color: COLORS.gray,
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
   },
   messagesList: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  messagesListContent: {
+    flexGrow: 1,
+    paddingVertical: 16,
   },
   messageContainer: {
     marginVertical: 4,
@@ -867,12 +1167,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    padding: 16,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 24,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 12,
+    paddingBottom:30
   },
   messageInput: {
     flex: 1,
@@ -897,57 +1200,82 @@ const styles = StyleSheet.create({
     backgroundColor: '#9CA3AF',
   },
   searchContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 10,
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightGray,
-    borderRadius: 8,
-    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   searchIcon: {
     marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
+    color: '#1f2937',
+    padding: 0,
   },
-  searchResults: {
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  searchResultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  searchResultsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  closeSearchButton: {
+  clearSearchButton: {
+    marginLeft: 8,
     padding: 4,
   },
+  searchResults: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    maxHeight: height * 0.6,
+  },
+  searchSection: {
+    marginBottom: 16,
+  },
+  searchSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
   searchResultsList: {
-    maxHeight: 200,
+    maxHeight: 300,
+  },
+  noSearchResults: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  noSearchResultsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  noSearchResultsSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
   },
   searchResultItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 12,
-    marginBottom: 6,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
   },
   searchResultAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: COLORS.maroon,
     justifyContent: 'center',
     alignItems: 'center',
@@ -956,30 +1284,39 @@ const styles = StyleSheet.create({
   searchResultAvatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 20,
+    borderRadius: 22,
   },
   searchResultAvatarText: {
     color: COLORS.white,
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
   },
   searchResultInfo: {
     flex: 1,
   },
   searchResultName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#1F2937',
+    marginBottom: 2,
   },
   searchResultEmail: {
-    fontSize: 14,
-    color: COLORS.gray,
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  searchResultRoleBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   searchResultRole: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6b7280',
-    fontWeight: '500',
-    marginTop: 2,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
   errorAlert: {
     marginHorizontal: 20,
@@ -990,23 +1327,34 @@ const styles = StyleSheet.create({
     color: COLORS.gray,
   },
   chatHeaderAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: COLORS.maroon,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#F3F4F6',
   },
   chatHeaderAvatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 20,
+    borderRadius: 22,
+  },
+  chatHeaderAvatarFallback: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
+    backgroundColor: COLORS.maroon,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   chatHeaderAvatarText: {
     color: COLORS.white,
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   chatHeaderText: {
     flex: 1,
@@ -1018,10 +1366,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 10,
   },
-  debugText: {
-    fontSize: 14,
-    color: COLORS.gray,
-  },
   createConversationButton: {
     marginTop: 20,
     backgroundColor: COLORS.maroon,
@@ -1030,32 +1374,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   createConversationButtonText: {
-    color: COLORS.white,
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  showUsersButton: {
-    marginTop: 12,
-    backgroundColor: COLORS.blue || '#3b82f6',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-  },
-  showUsersButtonText: {
-    color: COLORS.white,
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  testButton: {
-    marginTop: 10,
-    backgroundColor: COLORS.blue,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-  },
-  testButtonText: {
     color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
@@ -1096,6 +1414,9 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     padding: 8,
+  },
+  emptyListContainer: {
+    flexGrow: 1,
   },
 });
 

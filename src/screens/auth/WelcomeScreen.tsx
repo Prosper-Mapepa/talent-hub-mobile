@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     // marginBottom: 10,
   },
   logo: {
-    width: 120,
+    width: 170, 
     height: 120,
     borderRadius: 25,
     zIndex: 2,
@@ -327,8 +327,8 @@ const styles = StyleSheet.create({
     left: -9,
     right: -9,
     bottom: -9,
-    borderRadius: 100,
-    backgroundColor: '#FFFFFF',
+    // borderRadius: 100,
+    // backgroundColor: '#FFFFFF',
     zIndex: 1,
   },
   title: {
@@ -405,10 +405,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   featureSubtitle: {
-    fontSize: 10,
+    fontSize: 12,
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
-    fontWeight: '500',
+    fontWeight: '600',
     letterSpacing: 0.5,
   },
   buttonContainer: {
@@ -508,6 +508,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     letterSpacing: 1,
+    fontWeight: '600',
   },
 });
 

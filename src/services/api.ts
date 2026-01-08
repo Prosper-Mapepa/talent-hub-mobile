@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import {
   User,
   UserRole,
@@ -22,29 +23,33 @@ import {
 
 // Dynamic API base URL based on environment
 const getApiBaseUrl = () => {
+  // Get API base URL from environment variables (via expo-constants)
+  const envApiUrl = Constants.expoConfig?.extra?.apiBaseUrl;
+  
   // Check if we're in development mode
   if (__DEV__) {
     // For Android emulator, use 10.0.2.2
     // For iOS simulator, use localhost
-    // For physical device, use the machine's local IP
+    // For physical device, use the machine's local IP from env
     const platform = require('react-native').Platform.OS;
     if (platform === 'android') {
       // Check if running on emulator
       if (__DEV__) {
         return 'http://10.0.2.2:3001'; // Android emulator
       } else {
-        return 'http://35.32.125.176:3001'; // Physical device
+        // Use env variable for physical device, fallback to default
+        return envApiUrl || 'http://192.168.0.106:3001';
       }
     } else if (platform === 'ios') {
       return 'http://localhost:3001'; // iOS simulator
     }
   }
   
-  // Production or fallback
-  return process.env.API_BASE_URL || 'http://35.32.125.176:3001';
+  // Production or fallback - use env variable
+  return envApiUrl || 'http://192.168.0.106:3001';
 };
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://35.32.125.176:3001';
+const API_BASE_URL = getApiBaseUrl();
 console.log('API Service: Using base URL:', API_BASE_URL);
 
 class ApiService {
@@ -191,9 +196,7 @@ class ApiService {
     experienceLevel: string;
     location: string;
     salary?: string;
-    requirements: string[];
-    responsibilities: string[];
-    benefits: string[];
+    businessId: string;
   }): Promise<Job> {
     const response: AxiosResponse<ApiResponse<Job>> = await this.api.post('/jobs', jobData);
     return response.data.data!;
@@ -205,12 +208,20 @@ class ApiService {
   }
 
   async updateJob(jobId: string, jobData: Partial<Job>): Promise<Job> {
-    const response: AxiosResponse<ApiResponse<Job>> = await this.api.put(`/jobs/${jobId}`, jobData);
+    const response: AxiosResponse<ApiResponse<Job>> = await this.api.patch(`/jobs/${jobId}`, jobData);
     return response.data.data!;
   }
 
   async deleteJob(jobId: string): Promise<void> {
     await this.api.delete(`/jobs/${jobId}`);
+  }
+
+  async updateApplicationStatus(applicationId: string, status: string): Promise<Application> {
+    const response: AxiosResponse<ApiResponse<Application>> = await this.api.patch(
+      `/jobs/applications/${applicationId}/status`,
+      { status }
+    );
+    return response.data.data!;
   }
 
   // Student Services
@@ -558,7 +569,7 @@ class ApiService {
       
       console.log('Getting conversations for user ID:', userId);
       
-      let response: AxiosResponse<ApiResponse<Conversation[]>>;
+      let response: AxiosResponse<any>;
       
       try {
         // Try the primary endpoint first
@@ -577,52 +588,193 @@ class ApiService {
       }
       
       console.log('Raw conversations response:', response.data);
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-      console.log('Extracted conversations data:', response.data.data);
       
-      if (!response.data.data) {
-        console.log('No conversations data in response');
-        console.log('Response structure:', Object.keys(response.data));
-        
-        // Check if conversations are directly in the response
-        if (Array.isArray(response.data)) {
-          console.log('Conversations found directly in response');
-          return response.data;
-        }
-        
-        // Check if there's a different data structure
-        if ((response.data as any).conversations && Array.isArray((response.data as any).conversations)) {
-          console.log('Conversations found in conversations property');
-          return (response.data as any).conversations;
-        }
-        
-        // If no data structure matches, return empty array
-        console.log('No valid conversations data found, returning empty array');
-        return [];
+      // Normalize the response to extract conversations array
+      let conversations: Conversation[] = [];
+      
+      // Case 1: response.data.data is an array (standard ApiResponse structure)
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        conversations = response.data.data;
+      }
+      // Case 2: response.data is directly an array
+      else if (Array.isArray(response.data)) {
+        conversations = response.data;
+      }
+      // Case 3: response.data.data.data (nested data structure)
+      else if (response.data?.data?.data && Array.isArray(response.data.data.data)) {
+        conversations = response.data.data.data;
+      }
+      // Case 4: response.data.conversations
+      else if (response.data?.conversations && Array.isArray(response.data.conversations)) {
+        conversations = response.data.conversations;
+      }
+      // Case 5: Empty response or no conversations
+      else {
+        console.log('No conversations found in response, returning empty array');
+        conversations = [];
       }
       
-      console.log('Returning conversations:', response.data.data.length);
-      return response.data.data;
-    } catch (error) {
+      console.log(`Returning ${conversations.length} conversations`);
+      
+      // Ensure all conversations have required fields
+      return conversations.map((conv: any) => ({
+        id: conv.id,
+        participants: Array.isArray(conv.participants) ? conv.participants : [],
+        lastMessage: conv.lastMessage || undefined,
+        createdAt: conv.createdAt || new Date().toISOString(),
+        updatedAt: conv.updatedAt || conv.createdAt || new Date().toISOString(),
+      }));
+    } catch (error: any) {
       console.error('Error fetching conversations:', error);
+      // Don't throw error if it's a 401 (unauthorized) - user probably logged out
+      if (error?.response?.status === 401) {
+        console.log('User not authorized, returning empty conversations');
+        return [];
+      }
       throw error;
     }
   }
 
   async getMessages(conversationId: string): Promise<Message[]> {
-    const response: AxiosResponse<ApiResponse<Message[]>> = await this.api.get(`/conversations/${conversationId}/messages`);
-    return response.data.data!;
+    try {
+      const response: AxiosResponse<any> = await this.api.get(`/conversations/${conversationId}/messages`);
+      
+      // Normalize the response to extract messages array
+      let messages: Message[] = [];
+      
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        messages = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        messages = response.data;
+      } else if (response.data?.messages && Array.isArray(response.data.messages)) {
+        messages = response.data.messages;
+      }
+      
+      return messages;
+    } catch (error: any) {
+      console.error('Error fetching messages:', error);
+      if (error?.response?.status === 401) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async sendMessage(conversationId: string, messageData: { senderId: string, content: string }): Promise<Message> {
-    const response: AxiosResponse<ApiResponse<Message>> = await this.api.post(`/conversations/${conversationId}/messages`, messageData);
-    return response.data.data!;
+    try {
+      // Validate inputs before making the request
+      if (!conversationId || conversationId === 'undefined' || !conversationId.trim()) {
+        throw new Error('Conversation ID is required');
+      }
+      if (!messageData.senderId || messageData.senderId === 'undefined' || !messageData.senderId.trim()) {
+        throw new Error('Sender ID is required');
+      }
+      if (!messageData.content || !messageData.content.trim()) {
+        throw new Error('Message content is required');
+      }
+      
+      const response: AxiosResponse<any> = await this.api.post(`/conversations/${conversationId.trim()}/messages`, {
+        senderId: messageData.senderId.trim(),
+        content: messageData.content.trim()
+      });
+      
+      // Normalize the response to extract message
+      let message: Message | null = null;
+      
+      if (response.data?.data) {
+        message = response.data.data;
+      } else if (response.data && !response.data.data && response.data.id) {
+        // Message is directly in response.data
+        message = response.data;
+      }
+      
+      if (!message) {
+        throw new Error('Invalid response format from send message endpoint');
+      }
+      
+      return message;
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      throw error;
+    }
   }
 
   async createConversation(participantIds: string[]): Promise<Conversation> {
-    const response: AxiosResponse<ApiResponse<Conversation>> = await this.api.post('/conversations', { participantIds });
-    return response.data.data!;
+    try {
+      // Validate inputs before making the request
+      if (!participantIds || !Array.isArray(participantIds) || participantIds.length < 2) {
+        throw new Error('At least 2 participants are required');
+      }
+      
+      // Validate each ID
+      const validIds = participantIds.filter(id => id && typeof id === 'string' && id.trim() !== '' && id !== 'undefined');
+      if (validIds.length !== participantIds.length) {
+        throw new Error('Invalid participant IDs provided');
+      }
+      
+      const response: AxiosResponse<any> = await this.api.post('/conversations', { 
+        participantIds: validIds.map(id => id.trim()) 
+      });
+      
+      console.log('Create conversation raw response:', JSON.stringify(response.data, null, 2));
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+      
+      // Normalize the response to extract conversation
+      let conversation: Conversation | null = null;
+      
+      // Try different response structures (checking from most nested to least nested)
+      if (response.data?.data?.data?.id) {
+        // Triple nested: response.data.data.data
+        conversation = response.data.data.data;
+        console.log('Found conversation in response.data.data.data:', conversation?.id);
+      } else if (response.data?.data?.id) {
+        // Standard ApiResponse structure with nested data
+        conversation = response.data.data;
+        console.log('Found conversation in response.data.data:', conversation?.id);
+      } else if (response.data?.data && typeof response.data.data === 'object' && response.data.data.id) {
+        // Data object has id
+        conversation = response.data.data;
+        console.log('Found conversation in response.data.data (object):', conversation?.id);
+      } else if (response.data?.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+        // Sometimes data is an array, take the first item
+        conversation = response.data.data[0];
+        console.log('Found conversation in response.data.data (array):', conversation?.id);
+      } else if (response.data?.id) {
+        // Conversation is directly in response.data
+        conversation = response.data;
+        console.log('Found conversation in response.data:', conversation?.id);
+      } else if (response.data && typeof response.data === 'object') {
+        // Last resort: use response.data directly
+        conversation = response.data;
+        console.log('Using response.data directly:', conversation?.id);
+      }
+      
+      if (!conversation) {
+        console.error('No conversation found in response:', response.data);
+        throw new Error(`Invalid response format from create conversation endpoint. No conversation object found. Response: ${JSON.stringify(response.data)}`);
+      }
+      
+      if (!conversation?.id) {
+        console.error('Conversation found but missing ID:', conversation);
+        console.error('Full response:', JSON.stringify(response.data, null, 2));
+        throw new Error(`Invalid response format from create conversation endpoint. Conversation object exists but missing ID. Response: ${JSON.stringify(response.data)}`);
+      }
+      
+      console.log('Successfully parsed conversation ID:', conversation.id);
+      
+      // Ensure required fields are present
+      return {
+        id: conversation.id,
+        participants: Array.isArray(conversation.participants) ? conversation.participants : [],
+        lastMessage: conversation.lastMessage || undefined,
+        createdAt: conversation.createdAt || new Date().toISOString(),
+        updatedAt: conversation.updatedAt || conversation.createdAt || new Date().toISOString(),
+      };
+    } catch (error: any) {
+      console.error('Error creating conversation:', error);
+      throw error;
+    }
   }
 
   // File Upload Services
@@ -646,7 +798,10 @@ class ApiService {
   }
 
   async getAllUsers(): Promise<User[]> {
-    // Fetch students
+    const users: User[] = [];
+
+    // Fetch students (try-catch to handle permission errors)
+    try {
     const studentsResponse: AxiosResponse<ApiResponse<Student[]>> = await this.api.get('/students');
     console.log('Raw students:', studentsResponse.data.data);
     const students = (studentsResponse.data.data || [])
@@ -665,8 +820,20 @@ class ApiService {
         student: undefined,
         business: undefined,
       }));
+      users.push(...students);
+    } catch (error: any) {
+      // If user doesn't have permission to fetch students, skip silently
+      if (error?.response?.status === 403 || error?.response?.status === 401) {
+        console.log('No permission to fetch students, skipping...');
+      } else {
+        console.error('Error fetching students:', error);
+        // Re-throw non-permission errors
+        throw error;
+      }
+    }
 
-    // Fetch businesses
+    // Fetch businesses (try-catch to handle permission errors)
+    try {
     const businessesResponse: AxiosResponse<ApiResponse<Business[]>> = await this.api.get('/businesses');
     console.log('Raw businesses:', businessesResponse.data.data);
     const businesses = (businessesResponse.data.data || [])
@@ -675,7 +842,7 @@ class ApiService {
         id: b.userId,
         firstName: b.businessName,
         lastName: '',
-        email: '', // No email available unless you fetch the user separately
+          email: b.user?.email || b.email || '',
         role: UserRole.BUSINESS,
         status: UserStatus.ACTIVE,
         createdAt: b.createdAt,
@@ -685,8 +852,19 @@ class ApiService {
         student: undefined,
         business: undefined,
       }));
+      users.push(...businesses);
+    } catch (error: any) {
+      // If user doesn't have permission to fetch businesses, skip silently
+      if (error?.response?.status === 403 || error?.response?.status === 401) {
+        console.log('No permission to fetch businesses, skipping...');
+      } else {
+        console.error('Error fetching businesses:', error);
+        // Re-throw non-permission errors
+        throw error;
+      }
+    }
 
-    return [...students, ...businesses];
+    return users;
   }
 
   // Talent Services
@@ -696,8 +874,38 @@ class ApiService {
   }
 
   async getAllTalents(): Promise<Talent[]> {
-    const response: AxiosResponse<ApiResponse<Talent[]>> = await this.api.get('/students/talents/all');
-    return response.data.data!;
+    try {
+      console.log('Fetching all talents from /students/talents/all');
+      const response: AxiosResponse<any> = await this.api.get('/students/talents/all');
+      
+      console.log('getAllTalents raw response:', JSON.stringify(response.data, null, 2));
+      console.log('Response status:', response.status);
+      
+      // Handle different response structures
+      let talents: Talent[] = [];
+      
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        talents = response.data.data;
+        console.log(`Found ${talents.length} talents in response.data.data`);
+      } else if (Array.isArray(response.data)) {
+        talents = response.data;
+        console.log(`Found ${talents.length} talents directly in response.data`);
+      } else if (response.data?.data && !Array.isArray(response.data.data)) {
+        // Data might be an object, try to extract
+        console.warn('Response data.data is not an array:', response.data.data);
+        talents = [];
+      } else {
+        console.warn('Unexpected response structure:', response.data);
+        talents = [];
+      }
+      
+      console.log(`Returning ${talents.length} talents`);
+      return talents;
+    } catch (error: any) {
+      console.error('Error fetching all talents:', error);
+      console.error('Error response:', error.response?.data);
+      throw error;
+    }
   }
 
   async addTalent(studentId: string, talentData: {
@@ -713,14 +921,45 @@ class ApiService {
       
       if (files && files.length > 0) {
         files.forEach((file, index) => {
-          formData.append('files', file);
+          // Determine MIME type from file extension or type
+          let mimeType = 'application/octet-stream';
+          const fileName = file.name || '';
+          const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
+          
+          if (file.type === 'video') {
+            mimeType = fileExtension === 'mp4' ? 'video/mp4' : 
+                      fileExtension === 'mov' ? 'video/quicktime' :
+                      fileExtension === 'avi' ? 'video/x-msvideo' :
+                      'video/mp4';
+          } else if (file.type === 'document') {
+            mimeType = fileExtension === 'pdf' ? 'application/pdf' :
+                      fileExtension === 'doc' ? 'application/msword' :
+                      fileExtension === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+                      fileExtension === 'txt' ? 'text/plain' :
+                      'application/octet-stream';
+          } else if (file.type === 'image') {
+            mimeType = fileExtension === 'jpg' || fileExtension === 'jpeg' ? 'image/jpeg' :
+                      fileExtension === 'png' ? 'image/png' :
+                      fileExtension === 'gif' ? 'image/gif' :
+                      fileExtension === 'webp' ? 'image/webp' :
+                      'image/jpeg';
+          }
+          
+          // React Native FormData requires specific format
+          const fileData: any = {
+            uri: file.uri,
+            type: mimeType,
+            name: file.name || `file_${index}.${fileExtension || (file.type === 'video' ? 'mp4' : file.type === 'document' ? 'pdf' : 'jpg')}`,
+          };
+          formData.append('files', fileData as any);
         });
       }
 
       console.log('Sending talent data:', {
         studentId,
         talentData,
-        filesCount: files?.length || 0
+        filesCount: files?.length || 0,
+        files: files?.map(f => ({ uri: f.uri, type: f.type, name: f.name }))
       });
 
       const response: AxiosResponse<ApiResponse<Talent>> = await this.api.post(`/students/${studentId}/talents`, formData, {
@@ -860,6 +1099,121 @@ class ApiService {
     } catch (error: any) {
       console.error('Error responding to collaboration:', error);
       throw new Error(error.response?.data?.message || 'Failed to respond to collaboration');
+    }
+  }
+
+  // Follow/Unfollow Services
+  async followUser(followerId: string, followingId: string): Promise<any> {
+    try {
+      // Try different endpoint patterns
+      let response;
+      try {
+        response = await this.api.post('/users/follow', {
+          followerId,
+          followingId,
+        });
+      } catch (firstError: any) {
+        // If /users/follow doesn't exist, try alternative endpoints
+        if (firstError.response?.status === 404) {
+          try {
+            // Try /follow endpoint
+            response = await this.api.post('/follow', {
+              followerId,
+              followingId,
+            });
+          } catch (secondError: any) {
+            // Try /users/:userId/follow endpoint
+            try {
+              response = await this.api.post(`/users/${followerId}/follow`, {
+                followingId,
+              });
+            } catch (thirdError: any) {
+              // All endpoints failed, throw original error with helpful message
+              throw new Error('Follow feature is not available yet. The backend endpoint needs to be implemented.');
+            }
+          }
+        } else {
+          throw firstError;
+        }
+      }
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      console.error('Error following user:', error);
+      // Extract the actual error message from the backend
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to follow user';
+      throw new Error(errorMessage);
+    }
+  }
+
+  async unfollowUser(followerId: string, followingId: string): Promise<any> {
+    try {
+      // Try different endpoint patterns
+      let response;
+      try {
+        response = await this.api.post('/users/unfollow', {
+          followerId,
+          followingId,
+        });
+      } catch (firstError: any) {
+        // If /users/unfollow doesn't exist, try alternative endpoints
+        if (firstError.response?.status === 404) {
+          try {
+            // Try /unfollow endpoint
+            response = await this.api.post('/unfollow', {
+              followerId,
+              followingId,
+            });
+          } catch (secondError: any) {
+            // Try /users/:userId/unfollow endpoint
+            try {
+              response = await this.api.post(`/users/${followerId}/unfollow`, {
+                followingId,
+              });
+            } catch (thirdError: any) {
+              // All endpoints failed, throw original error with helpful message
+              throw new Error('Unfollow feature is not available yet. The backend endpoint needs to be implemented.');
+            }
+          }
+        } else {
+          throw firstError;
+        }
+      }
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      console.error('Error unfollowing user:', error);
+      // Extract the actual error message from the backend
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to unfollow user';
+      throw new Error(errorMessage);
+    }
+  }
+
+  async getFollowers(userId: string): Promise<User[]> {
+    try {
+      const response = await this.api.get(`/users/${userId}/followers`);
+      return response.data?.data || response.data || [];
+    } catch (error: any) {
+      console.error('Error fetching followers:', error);
+      return [];
+    }
+  }
+
+  async getFollowing(userId: string): Promise<User[]> {
+    try {
+      const response = await this.api.get(`/users/${userId}/following`);
+      return response.data?.data || response.data || [];
+    } catch (error: any) {
+      console.error('Error fetching following:', error);
+      return [];
+    }
+  }
+
+  async checkFollowStatus(followerId: string, followingId: string): Promise<boolean> {
+    try {
+      const response = await this.api.get(`/users/${followerId}/following/${followingId}`);
+      return response.data?.data?.isFollowing || response.data?.isFollowing || false;
+    } catch (error: any) {
+      console.error('Error checking follow status:', error);
+      return false;
     }
   }
 }

@@ -149,7 +149,7 @@ const ForgotPasswordScreen: React.FC = () => {
                 >
                   <View style={styles.logoGlow} />
                   <Image 
-                    source={require('../../../assets/k.png')} 
+                    source={require('../../../assets/ss.png')} 
                     style={styles.logo} 
                   />
                 </Animated.View>
@@ -278,12 +278,12 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     position: 'relative',
-    marginBottom: 20,
+    marginBottom: 30,
   },
   logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
+    width: 170, 
+    height: 120,
+    borderRadius: 25,
     zIndex: 2,
   },
   logoGlow: {
@@ -292,8 +292,8 @@ const styles = StyleSheet.create({
     left: -9,
     right: -9,
     bottom: -9,
-    borderRadius: 29,
-    backgroundColor: 'rgba(255, 197, 64, 0.2)',
+    // borderRadius: 100,
+    // backgroundColor: '#FFFFFF',
     zIndex: 1,
   },
   title: {
@@ -320,7 +320,8 @@ const styles = StyleSheet.create({
   form: {
     backgroundColor: 'white',
     borderRadius: 20,
-    padding: 30,
+    paddingVertical: 30,
+    paddingHorizontal: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,

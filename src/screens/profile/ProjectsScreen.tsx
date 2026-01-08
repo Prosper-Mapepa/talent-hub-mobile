@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchStudentProfile, addProject, updateProject, deleteProject } from '../../store/slices/studentsSlice';
@@ -48,7 +49,7 @@ const ProjectsScreen: React.FC = () => {
 
   const handleSaveProject = async () => {
     if (!projectForm.title.trim()) {
-      Alert.alert('Error', 'Project title cannot be empty.');
+      showToast('Project title cannot be empty.', 'error');
       return;
     }
 
@@ -64,7 +65,7 @@ const ProjectsScreen: React.FC = () => {
           githubUrl: projectForm.githubUrl || undefined,
           liveUrl: projectForm.liveUrl || undefined,
         })).unwrap();
-        Alert.alert('Success', 'Project updated successfully!');
+        showToast('Project updated successfully!', 'success');
       } else {
         await dispatch(addProject({
           projectData: {
@@ -76,36 +77,32 @@ const ProjectsScreen: React.FC = () => {
           },
           files: selectedFiles
         })).unwrap();
-        Alert.alert('Success', 'Project added successfully!');
+        showToast('Project added successfully!', 'success');
       }
       setShowProjectModal(false);
       setEditingProject(null);
       setProjectForm({ title: '', description: '', technologies: '', githubUrl: '', liveUrl: '' });
       setSelectedFiles([]);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to save project');
+      showToast(error.message || 'Failed to save project', 'error');
     }
   };
 
   const handleDeleteProject = (project: Project) => {
-    Alert.alert(
-      'Delete Project',
+    showToast(
       'Are you sure you want to delete this project?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await dispatch(deleteProject(project.id)).unwrap();
-              Alert.alert('Success', 'Project deleted successfully!');
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete project');
-            }
-          },
+      'warning',
+      {
+        text: 'Delete',
+        onPress: async () => {
+          try {
+            await dispatch(deleteProject(project.id)).unwrap();
+            showToast('Project deleted successfully!', 'success');
+          } catch (error: any) {
+            showToast(error.message || 'Failed to delete project', 'error');
+          }
         },
-      ]
+      }
     );
   };
 

@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
 import { fetchStudentProfile, addSkill, updateSkill, deleteSkill } from '../../store/slices/studentsSlice';
@@ -47,7 +48,7 @@ const SkillsScreen: React.FC = () => {
 
   const handleSaveSkill = async () => {
     if (!skillForm.name.trim()) {
-      Alert.alert('Error', 'Skill name cannot be empty.');
+      showToast('Skill name cannot be empty.', 'error');
       return;
     }
 
@@ -60,42 +61,38 @@ const SkillsScreen: React.FC = () => {
           proficiency: skillForm.proficiency,
           category: editingSkill.category || '', // Keep original category
         })).unwrap();
-        Alert.alert('Success', 'Skill proficiency updated successfully!');
+        showToast('Skill proficiency updated successfully!', 'success');
       } else {
         await dispatch(addSkill({
           name: skillForm.name,
           proficiency: skillForm.proficiency,
           category: skillForm.category,
         })).unwrap();
-        Alert.alert('Success', 'Skill added successfully!');
+        showToast('Skill added successfully!', 'success');
       }
       setShowSkillModal(false);
       setEditingSkill(null);
       setSkillForm({ name: '', proficiency: 'BEGINNER', category: '' });
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to save skill');
+      showToast(error.message || 'Failed to save skill', 'error');
     }
   };
 
   const handleDeleteSkill = (skill: Skill) => {
-    Alert.alert(
-      'Delete Skill',
+    showToast(
       'Are you sure you want to delete this skill?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await dispatch(deleteSkill(skill.id)).unwrap();
-              Alert.alert('Success', 'Skill deleted successfully!');
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete skill');
-            }
-          },
+      'warning',
+      {
+        text: 'Delete',
+        onPress: async () => {
+          try {
+            await dispatch(deleteSkill(skill.id)).unwrap();
+            showToast('Skill deleted successfully!', 'success');
+          } catch (error: any) {
+            showToast(error.message || 'Failed to delete skill', 'error');
+          }
         },
-      ]
+      }
     );
   };
 
