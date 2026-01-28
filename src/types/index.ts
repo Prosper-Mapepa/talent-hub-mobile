@@ -16,6 +16,7 @@ export interface User {
 
 export enum UserRole {
   STUDENT = 'student',
+  FACULTY = 'faculty',
   BUSINESS = 'business',
   ADMIN = 'admin'
 }
@@ -244,6 +245,15 @@ export interface RegisterCredentials {
   firstName: string;
   lastName: string;
   role: UserRole;
+  // Optional academic metadata for student/faculty registration
+  major?: string;
+  year?: string;
+  department?: string;
+  /**
+   * Client-side flag used to auto-accept the EULA after successful registration.
+   * Not required by the backend registration endpoints.
+   */
+  agreedToTerms?: boolean;
 }
 
 export interface AuthResponse {
@@ -259,8 +269,10 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
+  ResetPassword: { token?: string };
   PrivacyPolicy: undefined;
   TermsConditions: undefined;
+  Eula: undefined;
   MainTabs: undefined;
   JobDetail: { job: Job };
   PostJob: undefined;

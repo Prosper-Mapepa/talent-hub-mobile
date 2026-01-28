@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
@@ -38,6 +40,8 @@ export default function EditTalentScreen() {
   });
   const [selectedFiles, setSelectedFiles] = useState<any[]>([]);
   const [existingFiles, setExistingFiles] = useState<string[]>(talent.files || []);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
   const talentTitles = [
     'DJ & Music Production', 'Graphic Design Mastery', 'Creative Writing', 'Video Editing Pro', 
@@ -98,6 +102,26 @@ export default function EditTalentScreen() {
     setExistingFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Animate spinner
+  useEffect(() => {
+    if (isSubmitting || isLoading) {
+      Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      rotateAnim.setValue(0);
+    }
+  }, [isSubmitting, isLoading, rotateAnim]);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
       showToast('Please enter a title for your talent', 'error');
@@ -112,22 +136,30 @@ export default function EditTalentScreen() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       await dispatch(updateTalent({
         studentId: talent.studentId,
         talentId: talent.id,
         talentData: formData,
         files: selectedFiles,
+        existingFiles: existingFiles, // Send list of existing files to keep
       })).unwrap();
       
       // Refresh the talents list to ensure latest data
       await dispatch(fetchAllTalents());
       
-      showToast('Talent updated successfully!', 'success', {
-        text: 'OK',
-        onPress: () => navigation.goBack()
-      });
+      setIsSubmitting(false);
+      
+      // Show success message
+      showToast('Talent updated successfully!', 'success');
+      
+      // Auto-close after showing success message (2 seconds)
+      setTimeout(() => {
+        navigation.goBack();
+      }, 2000);
     } catch (error) {
+      setIsSubmitting(false);
       showToast('Failed to update talent. Please try again.', 'error');
     }
   };
@@ -135,7 +167,7 @@ export default function EditTalentScreen() {
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
     if (filePath.startsWith('http')) return filePath;
-    return `${process.env.API_BASE_URL || 'http://35.32.69.18:3001'}${filePath}`;
+    return `${process.env.API_BASE_URL || 'https://web-production-11221.up.railway.app'}${filePath}`;
   };
 
   const getFileIcon = (file: any) => {
@@ -151,13 +183,13 @@ export default function EditTalentScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
+      {/* <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#8F1A27" />
         </TouchableOpacity>
         <Text style={styles.title}>Edit Talent</Text>
         <View style={styles.placeholder} />
-      </View>
+      </View> */}
 
       {error && (
         <View style={styles.errorContainer}>
@@ -342,16 +374,18 @@ export default function EditTalentScreen() {
       <View style={styles.submitContainer}>
         <TouchableOpacity
           onPress={handleSubmit}
-          disabled={isLoading}
-          style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
+          disabled={isLoading || isSubmitting}
+          style={[styles.submitButton, (isLoading || isSubmitting) && styles.submitButtonDisabled]}
         >
-          {isLoading ? (
-            <Ionicons name="refresh" size={20} color="white" />
+          {(isLoading || isSubmitting) ? (
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <ActivityIndicator size="small" color="white" />
+            </Animated.View>
           ) : (
             <Ionicons name="checkmark-circle" size={20} color="white" />
           )}
           <Text style={styles.submitButtonText}>
-            {isLoading ? 'Updating...' : 'Update Talent'}
+            {(isLoading || isSubmitting) ? 'Updating...' : 'Update Talent'}
           </Text>
         </TouchableOpacity>
       </View>

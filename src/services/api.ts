@@ -24,33 +24,34 @@ import {
 // Dynamic API base URL based on environment
 const getApiBaseUrl = () => {
   // Get API base URL from environment variables (via expo-constants)
+  // This takes priority over __DEV__ mode to allow EAS build profiles to override
   const envApiUrl = Constants.expoConfig?.extra?.apiBaseUrl;
   
-  // Check if we're in development mode
+  // If environment URL is explicitly set (e.g., from EAS build profile), use it
+  if (envApiUrl) {
+    return envApiUrl;
+  }
+  
+  // Check if we're in development mode - use local backend for local development
   if (__DEV__) {
     // For Android emulator, use 10.0.2.2
     // For iOS simulator, use localhost
-    // For physical device, use the machine's local IP from env
     const platform = require('react-native').Platform.OS;
     if (platform === 'android') {
-      // Check if running on emulator
-      if (__DEV__) {
-        return 'http://10.0.2.2:3001'; // Android emulator
-      } else {
-        // Use env variable for physical device, fallback to default
-        return envApiUrl || 'http://192.168.0.106:3001';
-      }
+      return 'http://10.0.2.2:3001'; // Android emulator
     } else if (platform === 'ios') {
       return 'http://localhost:3001'; // iOS simulator
     }
   }
   
-  // Production or fallback - use env variable
-  return envApiUrl || 'http://192.168.0.106:3001';
+  // Production fallback
+  return 'https://web-production-11221.up.railway.app';
 };
 
 const API_BASE_URL = getApiBaseUrl();
 console.log('API Service: Using base URL:', API_BASE_URL);
+console.log('API Service: Config extra apiBaseUrl:', Constants.expoConfig?.extra?.apiBaseUrl);
+console.log('API Service: __DEV__ mode:', __DEV__);
 
 class ApiService {
   private api: AxiosInstance;
@@ -105,10 +106,17 @@ class ApiService {
         console.log('API Response Interceptor: Error message:', error.message);
         
         if (error.response?.status === 401) {
-          console.log('API Response Interceptor: 401 Unauthorized - clearing auth data');
-          // Token expired or invalid
-          await AsyncStorage.removeItem('authToken');
-          await AsyncStorage.removeItem('user');
+          console.log('API Response Interceptor: 401 Unauthorized');
+          // Only clear auth data for certain endpoints to avoid clearing during password change attempts
+          const url = error.config?.url || '';
+          // Don't clear auth for change-password - let the calling code handle it
+          if (!url.includes('/auth/change-password') && !url.includes('/auth/update-email')) {
+            console.log('API Response Interceptor: Clearing auth data for 401');
+            await AsyncStorage.removeItem('authToken');
+            await AsyncStorage.removeItem('user');
+          } else {
+            console.log('API Response Interceptor: Keeping auth data for password/email change');
+          }
         }
         return Promise.reject(error);
       }
@@ -135,6 +143,67 @@ class ApiService {
     await this.api.post('/auth/logout');
     await AsyncStorage.removeItem('authToken');
     await AsyncStorage.removeItem('user');
+  }
+
+  async deleteAccount(): Promise<void> {
+    try {
+      await this.api.delete('/auth/delete-account');
+    } catch (error: any) {
+      console.error('Error deleting account:', error);
+      throw new Error(error.response?.data?.message || error.message || 'Failed to delete account');
+    }
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    try {
+      await this.api.post('/auth/forgot-password', { email });
+    } catch (error: any) {
+      console.error('Error sending password reset email:', error);
+      throw new Error(error.response?.data?.message || error.message || 'Failed to send password reset email');
+    }
+  }
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    try {
+      await this.api.post('/auth/reset-password', { token, password });
+    } catch (error: any) {
+      console.error('Error resetting password:', error);
+      throw new Error(error.response?.data?.message || error.message || 'Failed to reset password');
+    }
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    try {
+      // Verify token exists before making request
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('You must be logged in to change your password. Please log in again.');
+      }
+      
+      await this.api.patch('/auth/change-password', { currentPassword, newPassword });
+    } catch (error: any) {
+      console.error('Error changing password:', error);
+      // Don't clear token for password change failures - user might need to retry
+      if (error.response?.status === 401) {
+        // Check if it's a wrong password error
+        const errorMessage = error.response?.data?.message || '';
+        if (errorMessage.toLowerCase().includes('current password') || 
+            errorMessage.toLowerCase().includes('invalid')) {
+          throw new Error('Current password is incorrect');
+        }
+        throw new Error('Authentication failed. Please log in again to change your password.');
+      }
+      throw new Error(error.response?.data?.message || error.message || 'Failed to change password');
+    }
+  }
+
+  async updateEmail(email: string): Promise<void> {
+    try {
+      await this.api.patch('/auth/update-email', { email });
+    } catch (error: any) {
+      console.error('Error updating email:', error);
+      throw new Error(error.response?.data?.message || error.message || 'Failed to update email');
+    }
   }
 
   // Note: getCurrentUser method removed since /users/{id} endpoint requires admin access
@@ -635,24 +704,81 @@ class ApiService {
     }
   }
 
-  async getMessages(conversationId: string): Promise<Message[]> {
+  async getMessages(conversationId: string, userId?: string): Promise<Message[]> {
     try {
-      const response: AxiosResponse<any> = await this.api.get(`/conversations/${conversationId}/messages`);
+      // Get userId from AsyncStorage if not provided
+      let currentUserId = userId;
+      if (!currentUserId) {
+        const userStr = await AsyncStorage.getItem('user');
+        if (userStr) {
+          try {
+            const user = JSON.parse(userStr);
+            currentUserId = user.id;
+          } catch (e) {
+            console.error('Failed to parse user from AsyncStorage:', e);
+          }
+        }
+      }
+
+      if (!currentUserId) {
+        throw new Error('User ID is required to fetch messages');
+      }
+
+      console.log('Fetching messages for conversation:', conversationId, 'with userId:', currentUserId);
+      
+      const response: AxiosResponse<any> = await this.api.get(`/conversations/${conversationId}/messages`, {
+        params: { userId: currentUserId }
+      });
+      
+      console.log('Messages API response:', JSON.stringify(response.data, null, 2));
+      console.log('Response data type:', typeof response.data);
+      console.log('Response.data:', response.data);
+      console.log('Response.data.data:', response.data?.data);
+      console.log('Response.data.data.data:', response.data?.data?.data);
+      console.log('Is response.data.data.data an array?', Array.isArray(response.data?.data?.data));
       
       // Normalize the response to extract messages array
+      // The backend returns: { success: true, data: { data: [messages...] }, message: "..." }
       let messages: Message[] = [];
       
-      if (response.data?.data && Array.isArray(response.data.data)) {
+      // Check for double-nested data structure (response.data.data.data)
+      if (response.data?.data?.data && Array.isArray(response.data.data.data)) {
+        messages = response.data.data.data;
+        console.log('Extracted messages from response.data.data.data:', messages.length);
+      } else if (response.data?.data && Array.isArray(response.data.data)) {
         messages = response.data.data;
+        console.log('Extracted messages from response.data.data:', messages.length);
       } else if (Array.isArray(response.data)) {
         messages = response.data;
+        console.log('Extracted messages from response.data (array):', messages.length);
       } else if (response.data?.messages && Array.isArray(response.data.messages)) {
         messages = response.data.messages;
+        console.log('Extracted messages from response.data.messages:', messages.length);
+      } else {
+        console.warn('Could not extract messages from response. Response structure:', {
+          hasData: !!response.data,
+          hasDataData: !!response.data?.data,
+          hasDataDataData: !!response.data?.data?.data,
+          dataKeys: response.data ? Object.keys(response.data) : [],
+          dataDataKeys: response.data?.data ? Object.keys(response.data.data) : [],
+          dataType: typeof response.data,
+          dataDataType: typeof response.data?.data,
+          isArray: Array.isArray(response.data),
+          isDataArray: Array.isArray(response.data?.data),
+          isDataDataArray: Array.isArray(response.data?.data?.data)
+        });
       }
       
-      return messages;
+      console.log('Final messages array length:', messages.length);
+      if (messages.length > 0) {
+        console.log('First message:', messages[0]);
+      }
+      
+      // Ensure we always return an array, even if empty
+      return Array.isArray(messages) ? messages : [];
     } catch (error: any) {
       console.error('Error fetching messages:', error);
+      console.error('Error response:', error.response?.data);
       if (error?.response?.status === 401) {
         return [];
       }
@@ -842,7 +968,7 @@ class ApiService {
         id: b.userId,
         firstName: b.businessName,
         lastName: '',
-          email: b.user?.email || b.email || '',
+          email: '',
         role: UserRole.BUSINESS,
         status: UserStatus.ACTIVE,
         createdAt: b.createdAt,
@@ -982,16 +1108,69 @@ class ApiService {
     title: string;
     category: string;
     description: string;
-  }, files?: any[]): Promise<Talent> {
+  }, files?: any[], existingFiles?: string[]): Promise<Talent> {
     try {
       const formData = new FormData();
       formData.append('title', talentData.title);
       formData.append('category', talentData.category);
       formData.append('description', talentData.description);
-      
+
+      // Add existing files to keep (as JSON array).
+      // IMPORTANT: send [] when user removed all files, otherwise backend keeps old ones.
+      if (existingFiles !== undefined) {
+        formData.append('existingFiles', JSON.stringify(existingFiles));
+      }
+
       if (files && files.length > 0) {
         files.forEach((file, index) => {
-          formData.append('files', file);
+          // Determine MIME type from file extension or type (same approach as addTalent)
+          let mimeType = 'application/octet-stream';
+          const fileName = file?.name || '';
+          const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
+
+          if (file?.type === 'video') {
+            mimeType =
+              fileExtension === 'mp4'
+                ? 'video/mp4'
+                : fileExtension === 'mov'
+                  ? 'video/quicktime'
+                  : fileExtension === 'avi'
+                    ? 'video/x-msvideo'
+                    : 'video/mp4';
+          } else if (file?.type === 'document') {
+            mimeType =
+              fileExtension === 'pdf'
+                ? 'application/pdf'
+                : fileExtension === 'doc'
+                  ? 'application/msword'
+                  : fileExtension === 'docx'
+                    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    : fileExtension === 'txt'
+                      ? 'text/plain'
+                      : 'application/octet-stream';
+          } else {
+            // treat as image by default
+            mimeType =
+              fileExtension === 'jpg' || fileExtension === 'jpeg'
+                ? 'image/jpeg'
+                : fileExtension === 'png'
+                  ? 'image/png'
+                  : fileExtension === 'gif'
+                    ? 'image/gif'
+                    : fileExtension === 'webp'
+                      ? 'image/webp'
+                      : 'image/jpeg';
+          }
+
+          const fileData: any = {
+            uri: file.uri,
+            type: mimeType,
+            name:
+              file.name ||
+              `file_${index}.${fileExtension || (file?.type === 'video' ? 'mp4' : file?.type === 'document' ? 'pdf' : 'jpg')}`,
+          };
+
+          formData.append('files', fileData as any);
         });
       }
 
@@ -1043,6 +1222,16 @@ class ApiService {
     }
   }
 
+  async getTalentLikes(talentId: string): Promise<{ count: number; users: any[] }> {
+    try {
+      const response = await this.api.get(`/students/talents/${talentId}/likes`);
+      return response.data.data || response.data;
+    } catch (error: any) {
+      console.error('Error getting talent likes:', error);
+      throw new Error(error.response?.data?.message || 'Failed to get talent likes');
+    }
+  }
+
   async requestCollaboration(studentId: string, recipientId: string, message: string, talentId?: string): Promise<any> {
     try {
       const response = await this.api.post(`/students/${studentId}/collaboration-request`, {
@@ -1074,6 +1263,17 @@ class ApiService {
       return response.data?.data || [];
     } catch (error: any) {
       console.error('Error fetching saved talents:', error);
+      // Return empty array instead of throwing error to prevent app crash
+      return [];
+    }
+  }
+
+  async getWhoLikedTalents(studentId: string): Promise<Student[]> {
+    try {
+      const response = await this.api.get(`/students/${studentId}/who-liked-talents`);
+      return response.data?.data || response.data || [];
+    } catch (error: any) {
+      console.error('Error fetching who liked talents:', error);
       // Return empty array instead of throwing error to prevent app crash
       return [];
     }
@@ -1214,6 +1414,89 @@ class ApiService {
     } catch (error: any) {
       console.error('Error checking follow status:', error);
       return false;
+    }
+  }
+
+  // Moderation Services
+  async getCurrentEula(): Promise<{ version: number; content: string; id: string }> {
+    try {
+      const response: AxiosResponse<any> = await this.api.get('/moderation/eula');
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      console.error('Error fetching EULA:', error);
+      throw error;
+    }
+  }
+
+  async acceptEula(version: number): Promise<void> {
+    try {
+      await this.api.post('/moderation/eula/accept', {
+        version,
+        accepted: true,
+      });
+    } catch (error: any) {
+      console.error('Error accepting EULA:', error);
+      throw error;
+    }
+  }
+
+  async checkEulaAcceptance(): Promise<{ accepted: boolean }> {
+    try {
+      const response: AxiosResponse<any> = await this.api.get('/moderation/eula/check');
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      // Handle 401 gracefully - user might not be authenticated yet
+      if (error.response?.status === 401) {
+        console.log('EULA check requires authentication');
+        return { accepted: false };
+      }
+      console.error('Error checking EULA acceptance:', error);
+      throw error;
+    }
+  }
+
+  async reportContent(report: {
+    type: 'MESSAGE' | 'PROFILE' | 'PROJECT' | 'ACHIEVEMENT' | 'JOB' | 'USER';
+    reportedUserId?: string;
+    contentId?: string;
+    reason: 'INAPPROPRIATE_CONTENT' | 'HARASSMENT' | 'SPAM' | 'FAKE_PROFILE' | 'INAPPROPRIATE_BEHAVIOR' | 'OTHER';
+    description?: string;
+  }): Promise<any> {
+    try {
+      const response: AxiosResponse<any> = await this.api.post('/moderation/report', report);
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      console.error('Error reporting content:', error);
+      throw error;
+    }
+  }
+
+  async blockUser(userId: string): Promise<any> {
+    try {
+      const response: AxiosResponse<any> = await this.api.post('/moderation/block', { userId });
+      return response.data?.data || response.data;
+    } catch (error: any) {
+      console.error('Error blocking user:', error);
+      throw error;
+    }
+  }
+
+  async unblockUser(userId: string): Promise<void> {
+    try {
+      await this.api.delete(`/moderation/block/${userId}`);
+    } catch (error: any) {
+      console.error('Error unblocking user:', error);
+      throw error;
+    }
+  }
+
+  async getBlockedUsers(): Promise<any[]> {
+    try {
+      const response: AxiosResponse<any> = await this.api.get('/moderation/blocked');
+      return response.data?.data || response.data || [];
+    } catch (error: any) {
+      console.error('Error fetching blocked users:', error);
+      throw error;
     }
   }
 }

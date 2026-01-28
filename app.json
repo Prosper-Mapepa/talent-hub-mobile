@@ -1,19 +1,21 @@
 {
   "expo": {
-    "name": "StudentTalentHubMobile",
+    "name": "CMU TalentHub",
     "slug": "StudentTalentHubMobile",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#8F1A27"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.prospermap.StudentTalentHubMobile",
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +23,8 @@
         "backgroundColor": "#8F1A27"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.prospermap.StudentTalentHubMobile"
+      "package": "com.prospermap.StudentTalentHubMobile",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,7 +32,8 @@
     "extra": {
       "eas": {
         "projectId": "6c631a05-9ba5-4202-ad44-0348f65f74ea"
-      }
+      },
+      "apiBaseUrl": "https://web-production-11221.up.railway.app"
     },
     "plugins": [
       "expo-av"

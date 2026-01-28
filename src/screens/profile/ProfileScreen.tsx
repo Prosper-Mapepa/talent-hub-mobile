@@ -12,6 +12,7 @@ import {
   Switch,
   Image,
   Dimensions,
+  FlatList,
 } from 'react-native';
 import { showToast } from '../../components/ui/toast';
 import { useNavigation } from '@react-navigation/native';
@@ -19,12 +20,15 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../types';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
-import { logout } from '../../store/slices/authSlice';
+import { logout, updateUser } from '../../store/slices/authSlice';
+import { apiService } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchStudentProfile, updateStudentProfile } from '../../store/slices/studentsSlice';
 import { fetchBusinessProfile, updateBusinessProfile, fetchBusinessJobs } from '../../store/slices/businessesSlice';
 import { fetchStudentTalents } from '../../store/slices/talentsSlice';
+import { fetchFollowers, fetchFollowing } from '../../store/slices/followsSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { UserRole } from '../../types';
+import { UserRole, User, Student } from '../../types';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,7 +45,20 @@ const ProfileScreen: React.FC = () => {
   
   // Modal states
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  
+  // Followers/Following/Who Liked state
+  const [showFollowersModal, setShowFollowersModal] = useState(false);
+  const [showFollowingModal, setShowFollowingModal] = useState(false);
+  const [showWhoLikedModal, setShowWhoLikedModal] = useState(false);
+  const [followers, setFollowers] = useState<User[]>([]);
+  const [following, setFollowing] = useState<User[]>([]);
+  const [whoLiked, setWhoLiked] = useState<Student[]>([]);
+  const [isLoadingFollowers, setIsLoadingFollowers] = useState(false);
+  const [isLoadingFollowing, setIsLoadingFollowing] = useState(false);
+  const [isLoadingWhoLiked, setIsLoadingWhoLiked] = useState(false);
   
   // Form states
   const [editForm, setEditForm] = useState({
@@ -56,6 +73,15 @@ const ProfileScreen: React.FC = () => {
     location: '',
     description: '',
   });
+
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (user?.role === UserRole.STUDENT) {
@@ -99,6 +125,79 @@ const ProfileScreen: React.FC = () => {
     }
   }, [student, business, user]);
 
+  // Load followers/following/who liked counts when user is loaded
+  useEffect(() => {
+    if (user?.id && user?.role === UserRole.STUDENT && student?.id) {
+      const loadSocialStats = async () => {
+        try {
+          const followersResult = await dispatch(fetchFollowers(user.id)).unwrap();
+          setFollowers(followersResult.followers || []);
+          const followingResult = await dispatch(fetchFollowing(user.id)).unwrap();
+          setFollowing(followingResult.following || []);
+          // Automatically fetch who liked
+          const students = await apiService.getWhoLikedTalents(student.id);
+          setWhoLiked(students || []);
+        } catch (error) {
+          console.error('Error loading social stats:', error);
+        }
+      };
+      loadSocialStats();
+    }
+  }, [user?.id, user?.role, student?.id, dispatch]);
+
+  const handleShowFollowers = async () => {
+    if (!user?.id) {
+      showToast('Unable to find user information', 'error');
+      return;
+    }
+    setIsLoadingFollowers(true);
+    setShowFollowersModal(true);
+    try {
+      const result = await dispatch(fetchFollowers(user.id)).unwrap();
+      setFollowers(result.followers || []);
+    } catch (error: any) {
+      console.error('Error fetching followers:', error);
+      showToast('Failed to load followers', 'error');
+      setShowFollowersModal(false);
+    } finally {
+      setIsLoadingFollowers(false);
+    }
+  };
+
+  const handleShowFollowing = async () => {
+    if (!user?.id) {
+      showToast('Unable to find user information', 'error');
+      return;
+    }
+    setIsLoadingFollowing(true);
+    setShowFollowingModal(true);
+    try {
+      const result = await dispatch(fetchFollowing(user.id)).unwrap();
+      setFollowing(result.following || []);
+    } catch (error: any) {
+      console.error('Error fetching following:', error);
+      showToast('Failed to load following list', 'error');
+      setShowFollowingModal(false);
+    } finally {
+      setIsLoadingFollowing(false);
+    }
+  };
+
+  const handleShowWhoLiked = async () => {
+    if (!student?.id) return;
+    setIsLoadingWhoLiked(true);
+    setShowWhoLikedModal(true);
+    try {
+      const students = await apiService.getWhoLikedTalents(student.id);
+      setWhoLiked(students || []);
+    } catch (error: any) {
+      console.error('Error fetching who liked:', error);
+      showToast('Failed to load who liked content', 'error');
+    } finally {
+      setIsLoadingWhoLiked(false);
+    }
+  };
+
   const handleLogout = () => {
     showToast(
       'Are you sure you want to logout?',
@@ -110,9 +209,57 @@ const ProfileScreen: React.FC = () => {
     );
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await apiService.deleteAccount();
+              showToast('Account deleted successfully', 'success');
+              // Logout after successful deletion
+              dispatch(logout());
+            } catch (error: any) {
+              console.error('Error deleting account:', error);
+              showToast(
+                error.message || 'Failed to delete account. Please try again.',
+                'error'
+              );
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
+      // Update email if it changed
+      if (editForm.email && editForm.email !== user?.email) {
+        try {
+          await apiService.updateEmail(editForm.email);
+          // Update user in Redux store and AsyncStorage
+          const updatedUser = { ...user, email: editForm.email };
+          dispatch(updateUser(updatedUser as any));
+          await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+        } catch (error: any) {
+          showToast(error.message || 'Failed to update email', 'error');
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Update profile data
       if (user?.role === UserRole.STUDENT) {
         await dispatch(updateStudentProfile({
           firstName: editForm.firstName,
@@ -136,6 +283,88 @@ const ProfileScreen: React.FC = () => {
       showToast('Failed to update profile', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [passwordErrors, setPasswordErrors] = useState<{
+    currentPassword?: string;
+    newPassword?: string;
+    confirmPassword?: string;
+  }>({});
+
+  const handleChangePassword = async () => {
+    // Clear previous errors
+    setPasswordErrors({});
+
+    // Validate all fields are filled
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      showToast('Please fill in all fields', 'error');
+      return;
+    }
+
+    // Validate passwords match
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordErrors({ confirmPassword: 'New passwords do not match' });
+      showToast('New passwords do not match', 'error');
+      return;
+    }
+
+    // Validate password length
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordErrors({ newPassword: 'Password must be at least 8 characters' });
+      showToast('Password must be at least 8 characters', 'error');
+      return;
+    }
+
+    // Validate password requirements (uppercase, lowercase, number, special char)
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(passwordForm.newPassword)) {
+      setPasswordErrors({ newPassword: 'Password must contain uppercase, lowercase, number, and special character (@$!%*?&)' });
+      showToast('Password must contain uppercase, lowercase, number, and special character (@$!%*?&)', 'error');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await apiService.changePassword(passwordForm.currentPassword, passwordForm.newPassword);
+      showToast('Password changed successfully!', 'success');
+      setPasswordErrors({});
+      setShowChangePasswordModal(false);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+    } catch (error: any) {
+      // Extract error message from response
+      let errorMessage = 'Failed to change password';
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      // Handle specific error cases
+      if (errorMessage.toLowerCase().includes('current password') || 
+          errorMessage.toLowerCase().includes('invalid') ||
+          error.response?.status === 401) {
+        setPasswordErrors({ currentPassword: 'Current password is incorrect' });
+        showToast('Current password is incorrect', 'error');
+      } else if (errorMessage.toLowerCase().includes('password') && errorMessage.toLowerCase().includes('match')) {
+        setPasswordErrors({ confirmPassword: 'New passwords do not match' });
+        showToast(errorMessage, 'error');
+      } else {
+        showToast(errorMessage, 'error');
+        
+        // If authentication failed, suggest re-login
+        if (errorMessage.includes('logged in') || errorMessage.includes('Authentication failed')) {
+          setTimeout(() => {
+            showToast('Please log out and log back in, then try again', 'info');
+          }, 2000);
+        }
+      }
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -231,6 +460,26 @@ const ProfileScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Followers/Following/Liked Stats */}
+      {user?.role === UserRole.STUDENT && (
+        <View style={styles.socialStatsSection}>
+          <View style={styles.socialStatsRow}>
+            <TouchableOpacity style={styles.socialStatButton} onPress={handleShowFollowers}>
+              <Text style={styles.socialStatNumber}>{followers.length}</Text>
+              <Text style={styles.socialStatLabel}>Followers</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.socialStatButton} onPress={handleShowFollowing}>
+              <Text style={styles.socialStatNumber}>{following.length}</Text>
+              <Text style={styles.socialStatLabel}>Following</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.socialStatButton} onPress={handleShowWhoLiked}>
+              <Text style={styles.socialStatNumber}>{whoLiked.length}</Text>
+              <Text style={styles.socialStatLabel}>Liked</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Portfolio Navigation */}
       <View style={styles.portfolioSection}>
           <View style={styles.sectionHeader}>
@@ -293,6 +542,36 @@ const ProfileScreen: React.FC = () => {
             <Ionicons name="chevron-forward" size={20} color="#6B7280" />
                       </TouchableOpacity>
         </View>
+      </View>
+
+      {/* Security Section */}
+      <View style={styles.securitySection}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="lock-closed" size={20} color="#6A0032" />
+          <Text style={styles.sectionTitle}>Security</Text>
+        </View>
+        <TouchableOpacity style={styles.changePasswordButton} onPress={() => setShowChangePasswordModal(true)}>
+          <View style={styles.changePasswordButtonContent}>
+            <Ionicons name="key" size={20} color="#6A0032" />
+            <Text style={styles.changePasswordButtonText}>Change Password</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Danger Zone */}
+      <View style={styles.dangerZone}>
+        <View style={styles.dangerZoneHeader}>
+          <Ionicons name="warning" size={20} color="#EF4444" />
+          <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+        </View>
+        <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+          <Ionicons name="trash" size={20} color="#EF4444" />
+          <Text style={styles.deleteAccountButtonText}>Delete Account</Text>
+        </TouchableOpacity>
+        <Text style={styles.dangerZoneSubtext}>
+          Permanently delete your account and all associated data. This action cannot be undone.
+        </Text>
       </View>
     </ScrollView>
   );
@@ -493,6 +772,36 @@ const ProfileScreen: React.FC = () => {
             )}
           </View>
         </View>
+
+        {/* Security Section */}
+        <View style={styles.securitySection}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="lock-closed" size={20} color="#6A0032" />
+            <Text style={styles.sectionTitle}>Security</Text>
+          </View>
+          <TouchableOpacity style={styles.changePasswordButton} onPress={() => setShowChangePasswordModal(true)}>
+            <View style={styles.changePasswordButtonContent}>
+              <Ionicons name="key" size={20} color="#6A0032" />
+              <Text style={styles.changePasswordButtonText}>Change Password</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Danger Zone */}
+        <View style={styles.dangerZone}>
+          <View style={styles.dangerZoneHeader}>
+            <Ionicons name="warning" size={20} color="#EF4444" />
+            <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+          </View>
+          <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+            <Ionicons name="trash" size={20} color="#EF4444" />
+            <Text style={styles.deleteAccountButtonText}>Delete Account</Text>
+          </TouchableOpacity>
+          <Text style={styles.dangerZoneSubtext}>
+            Permanently delete your account and all associated data. This action cannot be undone.
+          </Text>
+        </View>
       </ScrollView>
     );
   };
@@ -520,6 +829,18 @@ const ProfileScreen: React.FC = () => {
           >
             {user?.role === UserRole.STUDENT ? (
               <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Email</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editForm.email}
+                    onChangeText={(text) => setEditForm({ ...editForm, email: text })}
+                    placeholder="Enter email"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>First Name</Text>
                   <TextInput
@@ -570,6 +891,18 @@ const ProfileScreen: React.FC = () => {
               </>
             ) : (
               <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Email</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editForm.email}
+                    onChangeText={(text) => setEditForm({ ...editForm, email: text })}
+                    placeholder="Enter email"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Business Name</Text>
                   <TextInput
@@ -645,13 +978,164 @@ const ProfileScreen: React.FC = () => {
     </Modal>
   );
 
+  const renderChangePasswordModal = () => (
+    <Modal
+      visible={showChangePasswordModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowChangePasswordModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
+            <Text style={styles.modalTitle}>Change Password</Text>
+            <TouchableOpacity onPress={() => {
+              setShowChangePasswordModal(false);
+              setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+              setShowCurrentPassword(false);
+              setShowNewPassword(false);
+              setShowConfirmPassword(false);
+              setPasswordErrors({});
+            }}>
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
+          </View>
 
+          <ScrollView 
+            style={styles.modalBody}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 20 }}
+          >
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Current Password</Text>
+              <View style={[styles.passwordInputContainer, passwordErrors.currentPassword && styles.inputError]}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, passwordErrors.currentPassword && styles.inputErrorBorder]}
+                  value={passwordForm.currentPassword}
+                  onChangeText={(text) => {
+                    setPasswordForm({ ...passwordForm, currentPassword: text });
+                    if (passwordErrors.currentPassword) {
+                      setPasswordErrors({ ...passwordErrors, currentPassword: undefined });
+                    }
+                  }}
+                  placeholder="Enter current password"
+                  secureTextEntry={!showCurrentPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowCurrentPassword(!showCurrentPassword)}
+                  style={styles.eyeIcon}
+                >
+                  <Ionicons
+                    name={showCurrentPassword ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordErrors.currentPassword && (
+                <Text style={styles.errorText}>{passwordErrors.currentPassword}</Text>
+              )}
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>New Password</Text>
+              <View style={[styles.passwordInputContainer, passwordErrors.newPassword && styles.inputError]}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, passwordErrors.newPassword && styles.inputErrorBorder]}
+                  value={passwordForm.newPassword}
+                  onChangeText={(text) => {
+                    setPasswordForm({ ...passwordForm, newPassword: text });
+                    if (passwordErrors.newPassword) {
+                      setPasswordErrors({ ...passwordErrors, newPassword: undefined });
+                    }
+                  }}
+                  placeholder="Enter new password"
+                  secureTextEntry={!showNewPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowNewPassword(!showNewPassword)}
+                  style={styles.eyeIcon}
+                >
+                  <Ionicons
+                    name={showNewPassword ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordErrors.newPassword && (
+                <Text style={styles.errorText}>{passwordErrors.newPassword}</Text>
+              )}
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Confirm New Password</Text>
+              <View style={[styles.passwordInputContainer, passwordErrors.confirmPassword && styles.inputError]}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, passwordErrors.confirmPassword && styles.inputErrorBorder]}
+                  value={passwordForm.confirmPassword}
+                  onChangeText={(text) => {
+                    setPasswordForm({ ...passwordForm, confirmPassword: text });
+                    if (passwordErrors.confirmPassword) {
+                      setPasswordErrors({ ...passwordErrors, confirmPassword: undefined });
+                    }
+                  }}
+                  placeholder="Confirm new password"
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                  style={styles.eyeIcon}
+                >
+                  <Ionicons
+                    name={showConfirmPassword ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordErrors.confirmPassword && (
+                <Text style={styles.errorText}>{passwordErrors.confirmPassword}</Text>
+              )}
+            </View>
+          </ScrollView>
 
-
-
-  
-
-  
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => {
+                setShowChangePasswordModal(false);
+                setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+              }}
+              disabled={changingPassword}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleChangePassword}
+              disabled={changingPassword}
+              activeOpacity={0.8}
+              style={styles.saveButtonWrapper}
+            >
+              <LinearGradient
+                colors={['#8F1A27', '#6A0032', '#8F1A27']}
+                style={styles.saveButton}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                {changingPassword ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Change Password</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <View style={styles.container}>
@@ -708,6 +1192,196 @@ const ProfileScreen: React.FC = () => {
       )}
 
       {renderEditModal()}
+      {renderChangePasswordModal()}
+
+      {/* Followers Modal */}
+      {showFollowersModal && (
+        <Modal
+          visible={showFollowersModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowFollowersModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
+                <Text style={styles.modalTitle}>Followers</Text>
+                <TouchableOpacity
+                  onPress={() => setShowFollowersModal(false)}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {isLoadingFollowers ? (
+                  <View style={styles.modalLoadingContainer}>
+                    <ActivityIndicator size="large" color="#8F1A27" />
+                  </View>
+                ) : followers.length === 0 ? (
+                  <View style={styles.modalEmptyContainer}>
+                    <Ionicons name="people-outline" size={48} color="#d1d5db" />
+                    <Text style={styles.modalEmptyText}>No followers yet</Text>
+                  </View>
+                ) : (
+                  followers.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowFollowersModal(false);
+                        if (item.studentId) {
+                          navigation.navigate('StudentProfile', { studentId: item.studentId });
+                        }
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.email || 'Unknown User'}
+                        </Text>
+                        <Text style={styles.modalListEmail}>{item.email}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Following Modal */}
+      {showFollowingModal && (
+        <Modal
+          visible={showFollowingModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowFollowingModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
+                <Text style={styles.modalTitle}>Following</Text>
+                <TouchableOpacity
+                  onPress={() => setShowFollowingModal(false)}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {isLoadingFollowing ? (
+                  <View style={styles.modalLoadingContainer}>
+                    <ActivityIndicator size="large" color="#8F1A27" />
+                  </View>
+                ) : following.length === 0 ? (
+                  <View style={styles.modalEmptyContainer}>
+                    <Ionicons name="people-outline" size={48} color="#d1d5db" />
+                    <Text style={styles.modalEmptyText}>Not following anyone yet</Text>
+                  </View>
+                ) : (
+                  following.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowFollowingModal(false);
+                        if (item.studentId) {
+                          navigation.navigate('StudentProfile', { studentId: item.studentId });
+                        }
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.email || 'Unknown User'}
+                        </Text>
+                        <Text style={styles.modalListEmail}>{item.email}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Who Liked Modal */}
+      {showWhoLikedModal && (
+        <Modal
+          visible={showWhoLikedModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowWhoLikedModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
+                <Text style={styles.modalTitle}>Who Liked Content</Text>
+                <TouchableOpacity
+                  onPress={() => setShowWhoLikedModal(false)}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {isLoadingWhoLiked ? (
+                  <View style={styles.modalLoadingContainer}>
+                    <ActivityIndicator size="large" color="#8F1A27" />
+                  </View>
+                ) : whoLiked.length === 0 ? (
+                  <View style={styles.modalEmptyContainer}>
+                    <Ionicons name="heart-outline" size={48} color="#d1d5db" />
+                    <Text style={styles.modalEmptyText}>No one has liked content yet</Text>
+                  </View>
+                ) : (
+                  whoLiked.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowWhoLikedModal(false);
+                        navigation.navigate('StudentProfile', { studentId: item.id });
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.user?.firstName?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.user?.email || 'Unknown User'}
+                        </Text>
+                        {item.user?.email && (
+                          <Text style={styles.modalListEmail}>{item.user.email}</Text>
+                        )}
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -989,6 +1663,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
+  passwordInputContainer: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingRight: 40,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 12,
+    padding: 4,
+    zIndex: 1,
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  inputError: {
+    borderColor: '#EF4444',
+  },
+  inputErrorBorder: {
+    borderColor: '#EF4444',
+  },
   textArea: {
     height: 80,
     textAlignVertical: 'top',
@@ -1174,6 +1875,38 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
+  // Social Stats Section
+  socialStatsSection: {
+    marginBottom: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  socialStatsRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  socialStatButton: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  socialStatNumber: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#6A0032',
+    marginBottom: 4,
+  },
+  socialStatLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+
   // Portfolio Section
   portfolioSection: {
     marginBottom: 24,
@@ -1186,6 +1919,76 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
+  },
+  securitySection: {
+    marginBottom: 24,
+  },
+  changePasswordButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    marginTop: 12,
+  },
+  changePasswordButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  changePasswordButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  dangerZone: {
+    // marginTop: 10,
+    marginBottom: 24,
+    padding: 20,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  dangerZoneHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  dangerZoneTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+    gap: 8,
+  },
+  deleteAccountButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  dangerZoneSubtext: {
+    fontSize: 12,
+    color: '#991B1B',
+    lineHeight: 18,
   },
   navigationCards: {
     gap: 6,
@@ -1430,6 +2233,59 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  
+  // Modal list styles for followers/following
+  modalLoadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  modalListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: '#f9fafb',
+    borderRadius: 10,
+  },
+  modalListAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#8F1A27',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  modalListAvatarText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalListInfo: {
+    flex: 1,
+  },
+  modalListName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  modalListEmail: {
+    fontSize: 13,
+    color: '#6b7280',
   },
 });
 

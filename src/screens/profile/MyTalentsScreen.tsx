@@ -7,45 +7,30 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Modal,
-  TextInput,
   Dimensions,
 } from 'react-native';
 import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
-import { fetchStudentTalents, addTalent, updateTalent, deleteTalent } from '../../store/slices/talentsSlice';
+import { fetchStudentTalents, deleteTalent } from '../../store/slices/talentsSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { Talent } from '../../types';
-import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { RootStackParamList } from '../../types';
 
 const { width } = Dimensions.get('window');
 
+type ProfileNav = StackNavigationProp<RootStackParamList>;
+
 const MyTalentsScreen: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const navigation = useNavigation<ProfileNav>();
   const { user } = useAppSelector(state => state.auth);
   const { talents, isLoading } = useAppSelector(state => state.talents);
   
-  // Modal states
-  const [showTalentModal, setShowTalentModal] = useState(false);
-  
-  // Edit states
-  const [editingTalent, setEditingTalent] = useState<Talent | null>(null);
-  
-  // Form states
-  const [talentForm, setTalentForm] = useState({
-    title: '',
-    category: '',
-    description: '',
-  });
-
-  const [selectedFiles, setSelectedFiles] = useState<any[]>([]);
-
-  const talentCategories = [
-    'Artwork', 'STEM', 'Creative', 'Academic', 'Technology',
-    'Business', 'Health', 'Education', 'Entertainment', 'Other'
-  ];
+  // Legacy modal state no longer used (kept only to avoid larger refactor)
+  // const [showTalentModal, setShowTalentModal] = useState(false);
 
   useEffect(() => {
     if (user?.studentId) {
@@ -53,39 +38,7 @@ const MyTalentsScreen: React.FC = () => {
     }
   }, [dispatch, user?.studentId]);
 
-  const handleSaveTalent = async () => {
-    if (!talentForm.title.trim() || !talentForm.category.trim() || !talentForm.description.trim()) {
-      showToast('Please fill in all required fields', 'error');
-      return;
-    }
-
-    try {
-      if (editingTalent) {
-        await dispatch(updateTalent({
-          studentId: editingTalent.studentId,
-          talentId: editingTalent.id,
-          talentData: talentForm,
-          files: selectedFiles,
-        })).unwrap();
-        showToast('Talent updated successfully!', 'success');
-      } else {
-        await dispatch(addTalent({
-          studentId: user?.studentId!,
-          talentData: talentForm,
-          files: selectedFiles,
-        })).unwrap();
-        showToast('Talent added successfully!', 'success');
-      }
-      setShowTalentModal(false);
-      setEditingTalent(null);
-      setTalentForm({ title: '', category: '', description: '' });
-      setSelectedFiles([]);
-    } catch (error: any) {
-      console.error('Error saving talent:', error);
-      const errorMessage = error.message || 'Failed to save talent';
-      showToast(errorMessage, 'error');
-    }
-  };
+  // All add/edit operations are delegated to AddTalentScreen/EditTalentScreen now.
 
   const handleDeleteTalent = (talent: Talent) => {
     showToast(
@@ -111,36 +64,11 @@ const MyTalentsScreen: React.FC = () => {
   };
 
   const handleEditTalent = (talent: Talent) => {
-    setEditingTalent(talent);
-    setTalentForm({
-      title: talent.title,
-      category: talent.category,
-      description: talent.description,
-    });
-    setSelectedFiles([]);
-    setShowTalentModal(true);
+    // Reuse the dedicated EditTalent screen to avoid modal/layout issues.
+    navigation.navigate('EditTalent', { talent } as any);
   };
 
-  const pickFiles = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsMultipleSelection: true,
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      const newFiles = result.assets.map(asset => ({
-        uri: asset.uri,
-        type: asset.type || 'image',
-        name: asset.fileName || `file_${Date.now()}`,
-      }));
-      setSelectedFiles(prev => [...prev, ...newFiles]);
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
+  // All file picking & editing logic now lives in AddTalent/EditTalent screens.
 
   if (isLoading) {
     return (
@@ -156,12 +84,7 @@ const MyTalentsScreen: React.FC = () => {
       <View style={styles.addButtonContainer}>
         <View style={styles.addButtonContainerLeft}><Text style={styles.text}> Manage your talents </Text><TouchableOpacity
           style={styles.addButton}
-          onPress={() => {
-            setEditingTalent(null);
-            setTalentForm({ title: '', category: '', description: '' });
-            setSelectedFiles([]);
-            setShowTalentModal(true);
-          }}
+          onPress={() => navigation.navigate('AddTalent' as never)}
         >
           <Ionicons name="add" size={20} color="#FFFFFF" />
           {/* <Text style={styles.addButtonText}>Add Talent</Text> */}
@@ -232,12 +155,7 @@ const MyTalentsScreen: React.FC = () => {
                 <Text style={styles.emptySubtext}>Start building your portfolio by adding your first talent</Text>
                 <TouchableOpacity
                   style={styles.addFirstButton}
-                  onPress={() => {
-                    setEditingTalent(null);
-                    setTalentForm({ title: '', category: '', description: '' });
-                    setSelectedFiles([]);
-                    setShowTalentModal(true);
-                  }}
+                  onPress={() => navigation.navigate('AddTalent' as never)}
                 >
                   <Ionicons name="add" size={16} color="#FFFFFF" />
                   <Text style={styles.addFirstButtonText}>Add Your First Talent</Text>
@@ -248,114 +166,8 @@ const MyTalentsScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* Talent Modal */}
-      <Modal
-        visible={showTalentModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowTalentModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingTalent ? 'Edit Talent' : 'Add New Talent'}
-              </Text>
-              <TouchableOpacity onPress={() => setShowTalentModal(false)}>
-                <Ionicons name="close" size={24} color="#000" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Title *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={talentForm.title}
-                  onChangeText={(text) => setTalentForm({ ...talentForm, title: text })}
-                  placeholder="Enter talent title"
-                />
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Category *</Text>
-                <View style={styles.categoryPicker}>
-                  {talentCategories.map((category) => (
-                    <TouchableOpacity
-                      key={category}
-                      style={[
-                        styles.categoryButton,
-                        talentForm.category === category && styles.selectedCategoryButton,
-                      ]}
-                      onPress={() => setTalentForm({ ...talentForm, category: category })}
-                    >
-                      <Text
-                        style={[
-                          styles.categoryButtonText,
-                          talentForm.category === category && styles.selectedCategoryButtonText,
-                        ]}
-                      >
-                        {category}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Description *</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={talentForm.description}
-                  onChangeText={(text) => setTalentForm({ ...talentForm, description: text })}
-                  placeholder="Describe your talent in detail..."
-                  multiline
-                  numberOfLines={4}
-                />
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Files (optional)</Text>
-                <TouchableOpacity
-                  style={styles.fileInput}
-                  onPress={pickFiles}
-                >
-                  <Ionicons name="folder" size={20} color="#6B7280" />
-                  <Text style={styles.fileInputText}>
-                    {selectedFiles.length > 0 ? `${selectedFiles.length} files selected` : 'Choose files to showcase your talent'}
-                  </Text>
-                </TouchableOpacity>
-                {selectedFiles.length > 0 && (
-                  <View style={styles.selectedFilesList}>
-                    {selectedFiles.map((file, index) => (
-                      <View key={index} style={styles.selectedFileItem}>
-                        <Text style={styles.selectedFileName}>{file.name}</Text>
-                        <TouchableOpacity onPress={() => removeFile(index)}>
-                          <Ionicons name="close" size={16} color="#EF4444" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowTalentModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleSaveTalent}
-              >
-                <Text style={styles.saveButtonText}>
-                  {editingTalent ? 'Update Talent' : 'Save Talent'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* Talent editing/creation now reuses AddTalent and EditTalent screens via navigation,
+          so the in-place modal has been removed to avoid platform-specific modal glitches. */}
     </View>
   );
 };
@@ -573,38 +385,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(117, 12, 12, 0.8)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-  },
   text: {
     fontSize: 18,
     fontWeight: '500',
     color: '#000000',
 
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  modalBody: {
-    padding: 20,
   },
   inputGroup: {
     marginBottom: 16,
@@ -614,6 +399,29 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#374151',
     marginBottom: 8,
+  },
+  subLabel: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: -2,
+    marginBottom: 10,
+  },
+  suggestionsContainer: {
+    marginTop: 10,
+  },
+  suggestionButton: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  suggestionText: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '500',
   },
   input: {
     backgroundColor: '#F9FAFB',
@@ -627,38 +435,6 @@ const styles = StyleSheet.create({
   textArea: {
     height: 80,
     textAlignVertical: 'top',
-  },
-  categoryPicker: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
-  },
-  selectedCategoryButton: {
-    backgroundColor: '#6A0032',
-    borderColor: '#6A0032',
-  },
-  categoryButtonText: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  selectedCategoryButtonText: {
-    color: '#FFFFFF',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: 20,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
   },
   cancelButton: {
     flex: 1,
@@ -685,22 +461,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
   },
-  fileInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginTop: 8,
-  },
-  fileInputText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#6B7280',
-  },
   selectedFilesList: {
     marginTop: 8,
     paddingLeft: 12,
@@ -719,6 +479,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#374151',
     flex: 1,
+  },
+
+  // Existing files (Edit mode) - match Talents edit layout
+  filesList: {
+    gap: 8,
+    marginTop: 8,
+  },
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  fileThumbnail: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    marginRight: 10,
+  },
+  fileIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  fileRowName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  fileDeleteButton: {
+    padding: 4,
+    marginLeft: 8,
   },
 });
 

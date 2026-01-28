@@ -9,6 +9,9 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  SafeAreaView,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { showToast } from '../../components/ui/toast';
 import { useDispatch } from 'react-redux';
@@ -234,11 +237,11 @@ const ProjectsScreen: React.FC = () => {
       <Modal
         visible={showProjectModal}
         animationType="slide"
-        transparent={true}
+        transparent={false}
         onRequestClose={() => setShowProjectModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <SafeAreaView style={styles.modalContent}>
+          <StatusBar barStyle="dark-content" />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {editingProject ? 'Edit Project' : 'Add New Project'}
@@ -336,8 +339,7 @@ const ProjectsScreen: React.FC = () => {
                 <Text style={styles.saveButtonText}>Save Project</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+        </SafeAreaView>
       </Modal>
     </View>
   );
@@ -500,16 +502,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
   modalContent: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -525,6 +520,7 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   modalBody: {
+    flex: 1,
     padding: 20,
   },
   inputGroup: {
@@ -551,7 +547,9 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     flexDirection: 'row',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'android' ? 28 : 20,
     gap: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',

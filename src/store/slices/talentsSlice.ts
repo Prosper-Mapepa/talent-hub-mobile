@@ -45,13 +45,14 @@ export const addTalent = createAsyncThunk(
 
 export const updateTalent = createAsyncThunk(
   'talents/updateTalent',
-  async ({ studentId, talentId, talentData, files }: {
+  async ({ studentId, talentId, talentData, files, existingFiles }: {
     studentId: string;
     talentId: string;
     talentData: { title: string; category: string; description: string };
     files?: any[];
+    existingFiles?: string[];
   }) => {
-    const response = await apiService.updateTalent(studentId, talentId, talentData, files);
+    const response = await apiService.updateTalent(studentId, talentId, talentData, files, existingFiles);
     return response;
   }
 );

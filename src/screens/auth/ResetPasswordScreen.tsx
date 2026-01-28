@@ -17,23 +17,34 @@ import {
   Dimensions,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
-import { AppDispatch, useAppSelector } from '../../store';
+import { AppDispatch } from '../../store';
 import { apiService } from '../../services/api';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../types';
+import { showToast } from '../../components/ui/toast';
 
 const { width, height } = Dimensions.get('window');
 const isTablet = width >= 768 || (Platform.OS === 'ios' && Platform.isPad);
 const isLargeTablet = width >= 1024;
 
-const ForgotPasswordScreen: React.FC = () => {
-  const [email, setEmail] = useState('');
+type ResetPasswordScreenRouteProp = RouteProp<RootStackParamList, 'ResetPassword'>;
+type ResetPasswordScreenNavigationProp = StackNavigationProp<RootStackParamList, 'ResetPassword'>;
+
+const ResetPasswordScreen: React.FC = () => {
+  const route = useRoute<ResetPasswordScreenRouteProp>();
+  const navigation = useNavigation<ResetPasswordScreenNavigationProp>();
+  const dispatch = useDispatch<AppDispatch>();
+  
+  const token = route.params?.token || '';
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-  const [isEmailSent, setIsEmailSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -41,10 +52,14 @@ const ForgotPasswordScreen: React.FC = () => {
   const logoScaleAnim = useState(new Animated.Value(0.8))[0];
   const formSlideAnim = useState(new Animated.Value(30))[0];
 
-  const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'ForgotPassword'>>();
-  const dispatch = useDispatch<AppDispatch>();
-
   useEffect(() => {
+    if (!token) {
+      Alert.alert('Invalid Link', 'This reset link is invalid or has expired. Please request a new one.', [
+        { text: 'OK', onPress: () => navigation.navigate('ForgotPassword') },
+      ]);
+      return;
+    }
+
     // Smooth fade-in animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -68,14 +83,25 @@ const ForgotPasswordScreen: React.FC = () => {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [token, navigation, fadeAnim, slideAnim, logoScaleAnim, formSlideAnim]);
 
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
-    if (!email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Please enter a valid email address';
+    if (!password.trim()) {
+      newErrors.password = 'Password is required';
+    } else if (password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
+    } else {
+      // Validate password requirements
+      const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+      if (!passwordRegex.test(password)) {
+        newErrors.password = 'Password must contain uppercase, lowercase, number, and special character (@$!%*?&)';
+      }
+    }
+    if (!confirmPassword.trim()) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -86,15 +112,15 @@ const ForgotPasswordScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      await apiService.forgotPassword(email);
-      setIsEmailSent(true);
+      await apiService.resetPassword(token, password);
+      showToast('Password reset successfully!', 'success');
       Alert.alert(
-        'Reset Link Sent',
-        'We have sent a password reset link to your email. Please check your inbox or spam folder.',
+        'Success',
+        'Your password has been reset successfully. You can now login with your new password.',
         [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
       );
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send reset email. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to reset password. The link may have expired. Please request a new one.');
     } finally {
       setIsLoading(false);
     }
@@ -103,6 +129,10 @@ const ForgotPasswordScreen: React.FC = () => {
   const handleBackToLogin = () => {
     navigation.navigate('Login');
   };
+
+  if (!token) {
+    return null;
+  }
 
   return (
     <View style={styles.fullScreen}>
@@ -122,13 +152,6 @@ const ForgotPasswordScreen: React.FC = () => {
               contentContainerStyle={[styles.scrollContent, isTablet && styles.scrollContentTablet]}
               showsVerticalScrollIndicator={false}
             >
-              {/* Futuristic Background Elements */}
-              <View style={styles.backgroundElements}>
-                <View style={styles.geometricShape1} />
-                <View style={styles.geometricShape2} />
-                <View style={styles.geometricShape3} />
-              </View>
-
               {/* Header Section */}
               <Animated.View 
                 style={[
@@ -147,7 +170,6 @@ const ForgotPasswordScreen: React.FC = () => {
                     }
                   ]}
                 >
-                  <View style={styles.logoGlow} />
                   <Image 
                     source={require('../../../assets/ss.png')} 
                     style={styles.logo} 
@@ -175,7 +197,7 @@ const ForgotPasswordScreen: React.FC = () => {
                     }
                   ]}
                 >
-                  Reset your Password
+                  Reset Your Password
                 </Animated.Text>
               </Animated.View>
 
@@ -191,26 +213,64 @@ const ForgotPasswordScreen: React.FC = () => {
                 ]}
               >
                 <Text style={styles.formDescription}>
-                  Enter your email address and we'll send you a link to reset your password.
+                  Enter your new password below.
                 </Text>
 
                 <View style={styles.inputContainer}>
-                  <Ionicons name="mail-outline" size={isTablet ? (isLargeTablet ? 28 : 26) : 20} color="#666" style={styles.inputIcon} />
+                  <Ionicons name="lock-closed-outline" size={isTablet ? (isLargeTablet ? 28 : 26) : 20} color="#666" style={styles.inputIcon} />
                   <TextInput
-                    style={styles.input}
-                    placeholder="Email Address"
+                    style={styles.passwordInput}
+                    placeholder="New Password"
                     placeholderTextColor="#666"
-                    value={email}
+                    value={password}
                     onChangeText={(text) => {
-                      setEmail(text);
-                      if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
+                      setPassword(text);
+                      if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
                     }}
-                    keyboardType="email-address"
+                    secureTextEntry={!showPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={styles.eyeIcon}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-outline" : "eye-off-outline"}
+                      size={isTablet ? (isLargeTablet ? 24 : 22) : 20}
+                      color="#6b7280"
+                    />
+                  </TouchableOpacity>
                 </View>
-                {errors.email && <Text style={styles.fieldError}>{errors.email}</Text>}
+                {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
+
+                <View style={styles.inputContainer}>
+                  <Ionicons name="lock-closed-outline" size={isTablet ? (isLargeTablet ? 28 : 26) : 20} color="#666" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Confirm New Password"
+                    placeholderTextColor="#666"
+                    value={confirmPassword}
+                    onChangeText={(text) => {
+                      setConfirmPassword(text);
+                      if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                    }}
+                    secureTextEntry={!showConfirmPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    style={styles.eyeIcon}
+                  >
+                    <Ionicons
+                      name={showConfirmPassword ? "eye-outline" : "eye-off-outline"}
+                      size={isTablet ? (isLargeTablet ? 24 : 22) : 20}
+                      color="#6b7280"
+                    />
+                  </TouchableOpacity>
+                </View>
+                {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
 
                 <TouchableOpacity
                   style={[styles.resetButton, isLoading && styles.disabledButton]}
@@ -226,7 +286,7 @@ const ForgotPasswordScreen: React.FC = () => {
                     {isLoading ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.resetButtonText}>Send Reset Link</Text>
+                      <Text style={styles.resetButtonText}>Reset Password</Text>
                     )}
                   </LinearGradient>
                 </TouchableOpacity>
@@ -281,27 +341,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: isTablet ? (isLargeTablet ? 40 : 50) : 60,
     marginBottom: isTablet ? (isLargeTablet ? 50 : 45) : 40,
-    zIndex: 1,
   },
   logoContainer: {
-    position: 'relative',
     marginBottom: isTablet ? (isLargeTablet ? 50 : 40) : 30,
   },
   logo: {
     width: isTablet ? (isLargeTablet ? 280 : 240) : 170, 
     height: isTablet ? (isLargeTablet ? 200 : 170) : 120,
     borderRadius: 25,
-    zIndex: 2,
-  },
-  logoGlow: {
-    position: 'absolute',
-    top: -9,
-    left: -9,
-    right: -9,
-    bottom: -9,
-    // borderRadius: 100,
-    // backgroundColor: '#FFFFFF',
-    zIndex: 1,
   },
   title: {
     fontSize: isTablet ? (isLargeTablet ? 56 : 48) : 28,
@@ -309,9 +356,6 @@ const styles = StyleSheet.create({
     color: '#FFC540',
     marginBottom: isTablet ? 12 : 8,
     textAlign: 'center',
-    textShadowColor: '#FFC540',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
     letterSpacing: 2,
   },
   title2: {
@@ -353,22 +397,30 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    paddingHorizontal: isTablet ? (isLargeTablet ? 20 : 18) : 14,
-    backgroundColor: '#F9FAFB',
-    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
-    marginBottom: isTablet ? (isLargeTablet ? 18 : 16) : 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 24 : 22) : 16,
+    backgroundColor: '#f8f9fa',
+    height: isTablet ? (isLargeTablet ? 70 : 64) : 52,
+    marginBottom: isTablet ? (isLargeTablet ? 24 : 22) : 16,
+    position: 'relative',
   },
   inputIcon: {
     marginRight: 12,
   },
-  input: {
+  passwordInput: {
     flex: 1,
     fontSize: isTablet ? (isLargeTablet ? 20 : 19) : 16,
     color: '#333',
     height: '100%',
+    paddingRight: 40,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: isTablet ? (isLargeTablet ? 24 : 22) : 16,
+    padding: 4,
+    zIndex: 1,
   },
   fieldError: {
     color: '#ff4444',
@@ -379,7 +431,7 @@ const styles = StyleSheet.create({
   },
   resetButton: {
     borderRadius: 12,
-    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
+    height: isTablet ? (isLargeTablet ? 70 : 64) : 52,
     overflow: 'hidden',
     shadowColor: '#8F1A27',
     shadowOffset: {
@@ -389,7 +441,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
-    marginBottom: isTablet ? (isLargeTablet ? 24 : 22) : 18,
+    marginBottom: isTablet ? (isLargeTablet ? 28 : 26) : 20,
   },
   buttonGradient: {
     flex: 1,
@@ -417,43 +469,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  backgroundElements: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: -1,
-  },
-  geometricShape1: {
-    position: 'absolute',
-    top: 100,
-    right: -50,
-    width: 100,
-    height: 100,
-    backgroundColor: 'rgba(255, 197, 64, 0.1)',
-    borderRadius: 20,
-    transform: [{ rotate: '45deg' }],
-  },
-  geometricShape2: {
-    position: 'absolute',
-    bottom: 200,
-    left: -30,
-    width: 80,
-    height: 80,
-    backgroundColor: 'rgba(143, 26, 39, 0.1)',
-    borderRadius: 40,
-  },
-  geometricShape3: {
-    position: 'absolute',
-    top: 300,
-    left: 50,
-    width: 60,
-    height: 60,
-    backgroundColor: 'rgba(106, 0, 50, 0.1)',
-    borderRadius: 30,
-    transform: [{ rotate: '30deg' }],
-  },
 });
 
-export default ForgotPasswordScreen; 
+export default ResetPasswordScreen;

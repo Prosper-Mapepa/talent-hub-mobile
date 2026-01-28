@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   Animated,
   Dimensions,
@@ -133,63 +132,57 @@ export const Toast: React.FC<ToastProps> = ({
   if (!visible) return null;
 
   return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="none"
-      onRequestClose={handleClose}
-      statusBarTranslucent
-    >
-      <View style={styles.overlay}>
-        <Animated.View
-          style={animatedStyle}
-        >
-          <View style={[styles.toast, { backgroundColor: config.bgColor, borderColor: config.borderColor }]}>
-            <View style={styles.content}>
-              <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                <Ionicons name="close" size={20} color="#6b7280" />
-              </TouchableOpacity>
-              <View style={styles.iconContainerTop}>
-                <View style={[styles.iconCircle, { backgroundColor: `${config.iconColor}15` }]}>
-                  <Ionicons name={config.icon} size={32} color={config.iconColor} />
-                </View>
-              </View>
-              <View style={styles.textContainer}>
-                <Text style={styles.message}>{message}</Text>
+    <View style={styles.overlay} pointerEvents="box-none">
+      <Animated.View style={animatedStyle} pointerEvents="auto">
+        <View style={[styles.toast, { backgroundColor: config.bgColor, borderColor: config.borderColor }]}>
+          <View style={styles.content}>
+            <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+              <Ionicons name="close" size={20} color="#6b7280" />
+            </TouchableOpacity>
+            <View style={styles.iconContainerTop}>
+              <View style={[styles.iconCircle, { backgroundColor: `${config.iconColor}15` }]}>
+                <Ionicons name={config.icon} size={32} color={config.iconColor} />
               </View>
             </View>
-            {actionButton && (
-              <TouchableOpacity
-                onPress={() => {
-                  actionButton.onPress();
-                  handleClose();
-                }}
-                style={[styles.actionButton, { borderTopColor: config.borderColor }]}
-              >
-                <LinearGradient
-                  colors={config.colors as [string, string, ...string[]]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.actionButtonGradient}
-                >
-                  <Text style={styles.actionButtonText}>{actionButton.text}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
+            <View style={styles.textContainer}>
+              <Text style={styles.message}>{message}</Text>
+            </View>
           </View>
-        </Animated.View>
-      </View>
-    </Modal>
+          {actionButton && (
+            <TouchableOpacity
+              onPress={() => {
+                actionButton.onPress();
+                handleClose();
+              }}
+              style={[styles.actionButton, { borderTopColor: config.borderColor }]}
+            >
+              <LinearGradient
+                colors={config.colors as [string, string, ...string[]]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.actionButtonGradient}
+              >
+                <Text style={styles.actionButtonText}>{actionButton.text}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Animated.View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    ...StyleSheet.absoluteFillObject,
+    // IMPORTANT: no dimming backdrop. A dim overlay can appear as a "black screen"
+    // during transitions (especially on iOS when other modals are dismissing).
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
+    zIndex: 9999,
+    elevation: 9999,
   },
   toastContainer: {
     width: width - 32,
@@ -263,6 +256,13 @@ let toastRef: {
   hide: () => void;
 } | null = null;
 
+// If showToast is called before ToastManager mounts, queue it.
+let pendingToast: {
+  message: string;
+  type: ToastType;
+  actionButton?: { text: string; onPress: () => void };
+} | null = null;
+
 export const showToast = (
   message: string,
   type: ToastType = 'info',
@@ -270,6 +270,8 @@ export const showToast = (
 ) => {
   if (toastRef) {
     toastRef.show(message, type, actionButton);
+  } else {
+    pendingToast = { message, type, actionButton };
   }
 };
 
@@ -281,6 +283,12 @@ export const hideToast = () => {
 
 export const setToastRef = (ref: typeof toastRef) => {
   toastRef = ref;
+  // Flush any queued toast once we have a ref
+  if (toastRef && pendingToast) {
+    const { message, type, actionButton } = pendingToast;
+    pendingToast = null;
+    toastRef.show(message, type, actionButton);
+  }
 };
 
 // Toast Manager Component

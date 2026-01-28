@@ -9,6 +9,9 @@ import {
   StatusBar,
   SafeAreaView,
   Image,
+  Platform,
+  useWindowDimensions,
+  ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -16,10 +19,22 @@ import type { RootStackParamList } from '../../types';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width, height } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const isTablet = screenWidth >= 768 || (Platform.OS === 'ios' && Platform.isPad);
+const isLargeTablet = screenWidth >= 1024;
+const isSmallScreen = screenWidth < 375; // iPhone SE and similar small devices
 
 const WelcomeScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'Welcome'>>();
+  const { width, height } = useWindowDimensions();
+  
+  // Responsive breakpoints - adjust for smaller screens
+  // iPhone SE (1st/2nd gen): 320x568, iPhone 8: 375x667, iPhone 12/13 mini: 375x812
+  // Apply responsive styles to all phones (not tablets) for better small screen support
+  const currentIsTablet = width >= 768 || (Platform.OS === 'ios' && Platform.isPad);
+  const currentIsLargeTablet = width >= 1024;
+  const isSmallDevice = !currentIsTablet && width <= 414; // All phones <= 414px
+  const isMediumDevice = !currentIsTablet && width > 414 && width < 768;
   
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -77,7 +92,7 @@ const WelcomeScreen: React.FC = () => {
         end={{ x: 1, y: 1 }}
       >
         <SafeAreaView style={styles.safeArea}>
-          <View style={styles.container}>
+          <View style={styles.contentWrapper}>
             {/* Futuristic Background Elements */}
             <View style={styles.backgroundElements}>
               <View style={styles.geometricShape1} />
@@ -85,162 +100,239 @@ const WelcomeScreen: React.FC = () => {
               <View style={styles.geometricShape3} />
             </View>
 
-            {/* Header Section */}
-            <Animated.View 
-              style={[
-                styles.header,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }]
-                }
+            <ScrollView
+              contentContainerStyle={[
+                styles.scrollContainer,
+                currentIsTablet && styles.scrollContainerTablet,
+                isSmallDevice && styles.scrollContainerSmall,
               ]}
+              showsVerticalScrollIndicator={false}
             >
-              <Animated.View 
-                style={[
-                  styles.logoContainer,
-                  {
-                    transform: [{ scale: logoScaleAnim }]
-                  }
-                ]}
-              >
-                <View style={styles.logoGlow} />
-                <View style={styles.logoContainer}>
-                  <Image 
-                    source={require('../../../assets/ss.png')} 
-                    style={styles.logo} 
-                  />
-                </View>
-              </Animated.View>
-              
-              <Animated.Text 
-                style={[
-                  styles.title,
-                  {
-                    opacity: fadeAnim,
-                    transform: [{ translateY: slideAnim }]
-                  }
-                ]}
-              >
-                CMU <Text style={styles.title2}>TALENT</Text>HUB
-              </Animated.Text>
-              
-              <Animated.Text 
-                style={[
-                  styles.subtitle,
-                  {
-                    opacity: fadeAnim,
-                    transform: [{ translateY: slideAnim }]
-                  }
-                ]}
-              >
-                CONNECT • SHOWCASE • EVOLVE
-              </Animated.Text>
-            </Animated.View>
-
-            {/* Futuristic Feature Cards */}
-            <Animated.View 
-              style={[
-                styles.featuresContainer,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ scale: cardScaleAnim }]
-                }
-              ]}
-            >
-              <View style={styles.featuresGrid}>
-                <View style={styles.featureCard}>
-                  <View style={styles.featureIconContainer}>
-                    <Ionicons name="star" size={32} color="#FFC540" />
-                    <View style={styles.iconGlow} />
-                  </View>
-                  <Text style={styles.featureTitle}>SHOWCASE</Text>
-                  <Text style={styles.featureSubtitle}>Your Talents</Text>
-                </View>
-
-                <View style={styles.featureCard}>
-                  <View style={styles.featureIconContainer}>
-                    <Ionicons name="briefcase" size={32} color="#FFC540" />
-                    <View style={styles.iconGlow} />
-                  </View>
-                  <Text style={styles.featureTitle}>DISCOVER</Text>
-                  <Text style={styles.featureSubtitle}>Opportunities</Text>
-                </View>
-
-                <View style={styles.featureCard}>
-                  <View style={styles.featureIconContainer}>
-                    <Ionicons name="people" size={32} color="#FFC540" />
-                    <View style={styles.iconGlow} />
-                  </View>
-                  <Text style={styles.featureTitle}>NETWORK</Text>
-                  <Text style={styles.featureSubtitle}>& Connect</Text>
-                </View>
-
-                <View style={styles.featureCard}>
-                  <View style={styles.featureIconContainer}>
-                    <Ionicons name="trending-up" size={32} color="#FFC540" />
-                    <View style={styles.iconGlow} />
-                  </View>
-                  <Text style={styles.featureTitle}>EVOLVE</Text>
-                  <Text style={styles.featureSubtitle}>Together</Text>
-                </View>
-              </View>
-            </Animated.View>
-
-            {/* Futuristic Action Buttons */}
-            <Animated.View 
-              style={[
-                styles.buttonContainer,
-                {
-                  transform: [{ translateY: buttonSlideAnim }]
-                }
-              ]}
-            >
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={styles.signInButton}
-                  onPress={handleSignIn}
-                  activeOpacity={0.9}
+              <View style={styles.topSection}>
+                {/* Header Section */}
+                <Animated.View 
+                  style={[
+                    styles.header,
+                    isSmallDevice && styles.headerSmall,
+                    {
+                      opacity: fadeAnim,
+                      transform: [{ translateY: slideAnim }]
+                    }
+                  ]}
                 >
-                  <LinearGradient
-                    colors={['#FFC540', '#FFD700', '#FFC540']}
-                    style={styles.buttonGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
+                  <Animated.View 
+                    style={[
+                      styles.logoContainer,
+                      {
+                        transform: [{ scale: logoScaleAnim }]
+                      }
+                    ]}
                   >
-                    <Ionicons name="log-in-outline" size={24} color="#8F1A27" />
-                    <Text style={styles.signInButtonText}>SIGN IN</Text>
-                  </LinearGradient>
-                  <View style={styles.buttonGlow} />
-                </TouchableOpacity>
+                    <View style={styles.logoGlow} />
+                    <View style={styles.logoContainer}>
+                      <Image 
+                        source={require('../../../assets/ss.png')} 
+                        style={[
+                          styles.logo,
+                          isSmallDevice && styles.logoSmall
+                        ]} 
+                      />
+                    </View>
+                  </Animated.View>
+                  
+                  <Animated.Text 
+                    style={[
+                      styles.title,
+                      isSmallDevice && styles.titleSmall,
+                      {
+                        opacity: fadeAnim,
+                        transform: [{ translateY: slideAnim }]
+                      }
+                    ]}
+                  >
+                    CMU <Text style={styles.title2}>TALENT</Text>HUB
+                  </Animated.Text>
+                  
+                  <Animated.Text 
+                    style={[
+                      styles.subtitle,
+                      isSmallDevice && styles.subtitleSmall,
+                      {
+                        opacity: fadeAnim,
+                        transform: [{ translateY: slideAnim }]
+                      }
+                    ]}
+                  >
+                    CONNECT • SHOWCASE • EVOLVE
+                  </Animated.Text>
+                </Animated.View>
 
-                <TouchableOpacity
-                  style={styles.joinButton}
-                  onPress={handleJoin}
-                  activeOpacity={0.9}
+                {/* Futuristic Feature Cards */}
+                <Animated.View 
+                  style={[
+                    styles.featuresContainer,
+                    currentIsTablet && styles.featuresContainerTablet,
+                    isSmallDevice && styles.featuresContainerSmall,
+                    {
+                      opacity: fadeAnim,
+                      transform: [{ scale: cardScaleAnim }]
+                    }
+                  ]}
                 >
-                  <View style={styles.joinButtonContent}>
-                    <Ionicons name="person-add-outline" size={24} color="#FFC540" />
-                    <Text style={styles.joinButtonText}>JOIN US</Text>
-                  </View>
-                  <View style={styles.joinButtonBorder} />
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
+                  <View style={[
+                    styles.featuresGrid, 
+                    currentIsTablet && styles.featuresGridTablet,
+                    isSmallDevice && styles.featuresGridSmall
+                  ]}>
+                    <View style={[
+                      styles.featureCard,
+                      isSmallDevice && styles.featureCardSmall
+                    ]}>
+                      <View style={[
+                        styles.featureIconContainer,
+                        isSmallDevice && styles.featureIconContainerSmall
+                      ]}>
+                        <Ionicons name="star" size={isSmallDevice ? 28 : (currentIsTablet ? 42 : 34)} color="#FFC540" />
+                        <View style={styles.iconGlow} />
+                      </View>
+                      <Text style={[styles.featureTitle, isSmallDevice && styles.featureTitleSmall]}>SHOWCASE</Text>
+                      <Text style={[styles.featureSubtitle, isSmallDevice && styles.featureSubtitleSmall]}>Your Talents</Text>
+                    </View>
 
-            {/* Futuristic Footer */}
-            <Animated.View 
-              style={[
-                styles.footer,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }]
-                }
-              ]}
-            >
-              <Text style={styles.footerText}>
-                EMPOWERING CMU STUDENTS TO SHINE ⚡
-              </Text>
-            </Animated.View>
+                    <View style={[
+                      styles.featureCard,
+                      isSmallDevice && styles.featureCardSmall
+                    ]}>
+                      <View style={[
+                        styles.featureIconContainer,
+                        isSmallDevice && styles.featureIconContainerSmall
+                      ]}>
+                        <Ionicons name="briefcase" size={isSmallDevice ? 28 : (currentIsTablet ? 42 : 34)} color="#FFC540" />
+                        <View style={styles.iconGlow} />
+                      </View>
+                      <Text style={[styles.featureTitle, isSmallDevice && styles.featureTitleSmall]}>DISCOVER</Text>
+                      <Text style={[styles.featureSubtitle, isSmallDevice && styles.featureSubtitleSmall]}>Opportunities</Text>
+                    </View>
+
+                    <View style={[
+                      styles.featureCard,
+                      isSmallDevice && styles.featureCardSmall
+                    ]}>
+                      <View style={[
+                        styles.featureIconContainer,
+                        isSmallDevice && styles.featureIconContainerSmall
+                      ]}>
+                        <Ionicons name="people" size={isSmallDevice ? 28 : (currentIsTablet ? 42 : 34)} color="#FFC540" />
+                        <View style={styles.iconGlow} />
+                      </View>
+                      <Text style={[styles.featureTitle, isSmallDevice && styles.featureTitleSmall]}>NETWORK</Text>
+                      <Text style={[styles.featureSubtitle, isSmallDevice && styles.featureSubtitleSmall]}>& Connect</Text>
+                    </View>
+
+                    <View style={[
+                      styles.featureCard,
+                      isSmallDevice && styles.featureCardSmall
+                    ]}>
+                      <View style={[
+                        styles.featureIconContainer,
+                        isSmallDevice && styles.featureIconContainerSmall
+                      ]}>
+                        <Ionicons name="trending-up" size={isSmallDevice ? 28 : (currentIsTablet ? 42 : 34)} color="#FFC540" />
+                        <View style={styles.iconGlow} />
+                      </View>
+                      <Text style={[styles.featureTitle, isSmallDevice && styles.featureTitleSmall]}>EVOLVE</Text>
+                      <Text style={[styles.featureSubtitle, isSmallDevice && styles.featureSubtitleSmall]}>Together</Text>
+                    </View>
+                  </View>
+                </Animated.View>
+              </View>
+
+              <View style={styles.bottomSection}>
+                {/* Futuristic Action Buttons (inline) */}
+                <Animated.View 
+                  style={[
+                    styles.buttonContainer,
+                    isSmallDevice && styles.buttonContainerSmall,
+                    {
+                      transform: [{ translateY: buttonSlideAnim }]
+                    }
+                  ]}
+                >
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.signInButton,
+                        styles.buttonRightSpacing,
+                        isSmallDevice && styles.signInButtonSmall,
+                        isSmallDevice && styles.buttonRightSpacingSmall,
+                      ]}
+                      onPress={handleSignIn}
+                      activeOpacity={0.9}
+                    >
+                      <LinearGradient
+                        colors={['#FFC540', '#FFD700', '#FFC540']}
+                        style={styles.buttonGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                      >
+                        <Ionicons name="log-in-outline" size={isSmallDevice ? 22 : (currentIsTablet ? 26 : 24)} color="#8F1A27" />
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.signInButtonText,
+                            isSmallDevice && styles.signInButtonTextSmall
+                          ]}
+                        >
+                          SIGN IN
+                        </Text>
+                      </LinearGradient>
+                      <View style={styles.buttonGlow} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.joinButton,
+                        isSmallDevice && styles.joinButtonSmall
+                      ]}
+                      onPress={handleJoin}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.joinButtonContent}>
+                        <Ionicons name="person-add-outline" size={isSmallDevice ? 22 : (currentIsTablet ? 26 : 24)} color="#FFC540" />
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.joinButtonText,
+                            isSmallDevice && styles.joinButtonTextSmall
+                          ]}
+                        >
+                          JOIN US
+                        </Text>
+                      </View>
+                      <View style={styles.joinButtonBorder} />
+                    </TouchableOpacity>
+                  </View>
+                </Animated.View>
+
+                {/* Footer pinned to bottom of layout */}
+                <Animated.View 
+                  style={[
+                    styles.footerDock,
+                    {
+                      opacity: fadeAnim,
+                      transform: [{ translateY: slideAnim }]
+                    }
+                  ]}
+                >
+                  <Text style={[
+                    styles.footerText,
+                    isSmallDevice && styles.footerTextSmall
+                  ]}>
+                    EMPOWERING CMU STUDENTS TO SHINE ⚡
+                  </Text>
+                </Animated.View>
+              </View>
+            </ScrollView>
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -255,10 +347,56 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  contentWrapper: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'center',
+    maxWidth: isTablet ? 800 : '100%',
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    width: '100%',
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    justifyContent: 'space-between',
+  },
+  scrollContainerTablet: {
+    paddingHorizontal: isLargeTablet ? 50 : 36,
+    paddingTop: isLargeTablet ? 28 : 20,
+    paddingBottom: isLargeTablet ? 32 : 24,
+  },
+  scrollContainerSmall: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 20,
+  },
+  topSection: {
+    width: '100%',
+    flex: 1,
+  },
+  bottomSection: {
+    width: '100%',
+    paddingTop: 20,
+  },
   container: {
     flex: 1,
     paddingHorizontal: 20,
     justifyContent: 'space-between',
+    maxWidth: isTablet ? 800 : '100%',
+    alignSelf: 'center',
+    width: '100%',
+  },
+  containerTablet: {
+    paddingHorizontal: isLargeTablet ? 60 : 40,
+    paddingVertical: isLargeTablet ? 40 : 20,
+  },
+  containerSmall: {
+    flexGrow: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 20,
+    justifyContent: 'flex-start',
   },
   gradient: {
     flex: 1,
@@ -307,19 +445,26 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginTop: 80,
-    // marginBottom: 50,
+    marginTop: isTablet ? (isLargeTablet ? 50 : 45) : 50,
+    marginBottom: isTablet ? (isLargeTablet ? 20 : 15) : 10,
     zIndex: 1,
+  },
+  headerSmall: {
+    marginTop: 35,
+    marginBottom: 8,
   },
   logoContainer: {
     position: 'relative',
-    // marginBottom: 10,
   },
   logo: {
-    width: 170, 
-    height: 120,
+    width: isTablet ? (isLargeTablet ? 220 : 200) : 170, 
+    height: isTablet ? (isLargeTablet ? 155 : 140) : 120,
     borderRadius: 25,
     zIndex: 2,
+  },
+  logoSmall: {
+    width: 120,
+    height: 85,
   },
   logoGlow: {
     position: 'absolute',
@@ -332,107 +477,204 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   title: {
-    fontSize: 36,
+    fontSize: isTablet ? (isLargeTablet ? 48 : 42) : 36,
     fontWeight: 'bold',
     color: '#FFC540',
     marginBottom: 8,
-    marginTop: 30,
+    marginTop: isTablet ? 40 : 30,
     textAlign: 'center',
     textShadowColor: '#FFC540',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 10,
     letterSpacing: 2,
   },
+  titleSmall: {
+    fontSize: 28,
+    marginTop: 20,
+    marginBottom: 6,
+    letterSpacing: 1,
+  },
   title2: {
     color: '#ffffff',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 16) : 14,
     color: '#ffffff',
     fontWeight: '600',
     textAlign: 'center',
     letterSpacing: 1,
+  },
+  subtitleSmall: {
+    fontSize: 11,
+    letterSpacing: 0.5,
   },
   featuresContainer: {
     flex: 1,
     justifyContent: 'center',
     zIndex: 1,
+    marginTop: isTablet ? (isLargeTablet ? 50 : 40) : 35,
+    marginBottom: isTablet ? (isLargeTablet ? 40 : 30) : 25,
+  },
+  featuresContainerTablet: {
+    maxWidth: isLargeTablet ? 750 : 650,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  featuresContainerSmall: {
+    flex: 0,
+    marginVertical: 20,
+    marginTop: 25,
+    marginBottom: 20,
   },
   featuresGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
+    gap: 16,
+  },
+  featuresGridTablet: {
+    paddingHorizontal: isLargeTablet ? 24 : 16,
+    justifyContent: isLargeTablet ? 'space-around' : 'space-between',
+    gap: isLargeTablet ? 24 : 20,
+  },
+  featuresGridSmall: {
+    paddingHorizontal: 4,
+    justifyContent: 'space-between',
+    gap: 12,
   },
   featureCard: {
-    width: '48%',
-    backgroundColor: 'rgba(255, 197, 64, 0.05)',
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 20,
+    width: isTablet ? (isLargeTablet ? '47%' : '48%') : '48%',
+    backgroundColor: 'rgba(255, 197, 64, 0.08)',
+    borderRadius: 20,
+    padding: isTablet ? (isLargeTablet ? 36 : 32) : 28,
+    marginBottom: isTablet ? (isLargeTablet ? 32 : 28) : 24,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 197, 64, 0.3)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 197, 64, 0.25)',
     position: 'relative',
+    minHeight: isTablet ? (isLargeTablet ? 200 : 180) : 160,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  featureCardSmall: {
+    width: '48%',
+    padding: 18,
+    marginBottom: 16,
+    borderRadius: 16,
+    minHeight: 140,
   },
   featureIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 197, 64, 0.1)',
+    width: isTablet ? (isLargeTablet ? 90 : 80) : 70,
+    height: isTablet ? (isLargeTablet ? 90 : 80) : 70,
+    borderRadius: isTablet ? (isLargeTablet ? 45 : 40) : 35,
+    backgroundColor: 'rgba(255, 197, 64, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 197, 64, 0.5)',
+    marginBottom: isTablet ? 24 : 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 197, 64, 0.4)',
     position: 'relative',
+  },
+  featureIconContainerSmall: {
+    width: 55,
+    height: 55,
+    borderRadius: 27.5,
+    marginBottom: 12,
   },
   iconGlow: {
     position: 'absolute',
-    top: -5,
-    left: -5,
-    right: -5,
-    bottom: -5,
-    borderRadius: 35,
-    backgroundColor: 'rgba(255, 197, 64, 0.2)',
+    top: -3,
+    left: -3,
+    right: -3,
+    bottom: -3,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 197, 64, 0.15)',
   },
   featureTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: isTablet ? (isLargeTablet ? 20 : 18) : 16,
+    fontWeight: '800',
     color: '#FFC540',
     textAlign: 'center',
+    marginBottom: 6,
+    letterSpacing: 1.2,
+  },
+  featureTitleSmall: {
+    fontSize: 13,
     marginBottom: 4,
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   featureSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 13,
+    color: 'rgba(255, 255, 255, 0.85)',
     textAlign: 'center',
-    fontWeight: '600',
+    fontWeight: '500',
     letterSpacing: 0.5,
   },
+  featureSubtitleSmall: {
+    fontSize: 11,
+    letterSpacing: 0.3,
+  },
   buttonContainer: {
-    marginBottom: 50,
+    marginBottom: isTablet ? (isLargeTablet ? 35 : 40) : 35,
+    marginTop: 20,
     zIndex: 1,
+    maxWidth: isTablet ? 600 : '100%',
+    alignSelf: 'center',
+    width: '100%',
+    paddingHorizontal: isTablet ? 10 : 0,
+  },
+  buttonContainerSmall: {
+    marginBottom: 20,
+    marginTop: 18,
+    paddingHorizontal: 0,
   },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
   },
+  buttonRightSpacing: {
+    marginRight: 12,
+  },
+  buttonRightSpacingSmall: {
+    marginRight: 10,
+  },
   signInButton: {
-    borderRadius: 25,
-    height: 55,
-    flex: 0.48,
+    borderRadius: 28,
+    minHeight: isTablet ? (isLargeTablet ? 65 : 60) : 56,
+    height: isTablet ? (isLargeTablet ? 65 : 60) : 56,
+    flex: 1,
     overflow: 'hidden',
     position: 'relative',
     shadowColor: '#FFC540',
     shadowOffset: {
       width: 0,
-      height: 6,
+      height: 4,
+    },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  signInButtonSmall: {
+    flex: 1,
+    minHeight: 52,
+    height: 52,
+    borderRadius: 26,
+    marginBottom: 0,
+    shadowOffset: {
+      width: 0,
+      height: 3,
     },
     shadowOpacity: 0.4,
-    shadowRadius: 12,
+    shadowRadius: 8,
     elevation: 8,
   },
   buttonGradient: {
@@ -440,6 +682,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
   },
   buttonGlow: {
     position: 'absolute',
@@ -447,22 +691,29 @@ const styles = StyleSheet.create({
     left: -2,
     right: -2,
     bottom: -2,
-    borderRadius: 27,
-    backgroundColor: 'rgba(255, 197, 64, 0.3)',
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 197, 64, 0.25)',
     zIndex: -1,
   },
   signInButtonText: {
     color: '#8F1A27',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 12,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 16,
+    fontWeight: '800',
+    marginLeft: 10,
+    letterSpacing: 1.2,
+  },
+  signInButtonTextSmall: {
+    fontSize: 15,
+    marginLeft: 8,
     letterSpacing: 1,
+    fontWeight: '800',
   },
   joinButton: {
-    backgroundColor: 'transparent',
-    borderRadius: 25,
-    height: 55,
-    flex: 0.48,
+    backgroundColor: 'rgba(255, 197, 64, 0.08)',
+    borderRadius: 28,
+    minHeight: isTablet ? (isLargeTablet ? 65 : 60) : 56,
+    height: isTablet ? (isLargeTablet ? 65 : 60) : 56,
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
@@ -471,15 +722,32 @@ const styles = StyleSheet.create({
     shadowColor: '#FFC540',
     shadowOffset: {
       width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  joinButtonSmall: {
+    flex: 1,
+    minHeight: 52,
+    height: 52,
+    borderRadius: 26,
+    marginBottom: 0,
+    shadowOffset: {
+      width: 0,
       height: 3,
     },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
-    elevation: 20,
+    elevation: 8,
   },
   joinButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
   },
   joinButtonBorder: {
     position: 'absolute',
@@ -487,28 +755,48 @@ const styles = StyleSheet.create({
     left: -2,
     right: -2,
     bottom: -2,
-    borderRadius: 27,
-    backgroundColor: 'rgba(255, 197, 64, 0.1)',
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 197, 64, 0.15)',
     zIndex: -1,
   },
   joinButtonText: {
     color: '#FFC540',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 12,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 16,
+    fontWeight: '800',
+    marginLeft: 10,
+    letterSpacing: 1.2,
+  },
+  joinButtonTextSmall: {
+    fontSize: 15,
+    marginLeft: 8,
     letterSpacing: 1,
+    fontWeight: '800',
   },
   footer: {
     alignItems: 'center',
-    marginBottom: 60,
+    marginBottom: isTablet ? (isLargeTablet ? 40 : 50) : 60,
     zIndex: 1,
+  },
+  footerSmall: {
+    marginBottom: 20,
+    marginTop: 5,
+  },
+  footerDock: {
+    alignItems: 'center',
+    marginTop: 12,
+    paddingBottom: 6,
   },
   footerText: {
     color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 10,
+    fontSize: isTablet ? (isLargeTablet ? 13 : 12) : 10,
     textAlign: 'center',
     letterSpacing: 1,
     fontWeight: '600',
+  },
+  footerTextSmall: {
+    fontSize: 8,
+    letterSpacing: 0.5,
+    paddingHorizontal: 10,
   },
 });
 

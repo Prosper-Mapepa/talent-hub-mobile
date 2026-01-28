@@ -30,12 +30,27 @@ export const fetchConversations = createAsyncThunk(
 
 export const fetchMessages = createAsyncThunk(
   'messages/fetchMessages',
-  async (conversationId: string, { rejectWithValue }) => {
+  async (conversationId: string, { getState, rejectWithValue }) => {
     try {
-      const messages = await apiService.getMessages(conversationId);
+      const state = getState() as { auth: { user: { id: string } } };
+      const userId = state.auth.user?.id;
+      
+      if (!userId) {
+        return rejectWithValue('User ID is required to fetch messages');
+      }
+      
+      console.log('Redux fetchMessages: conversationId:', conversationId, 'userId:', userId);
+      const messages = await apiService.getMessages(conversationId, userId);
+      console.log('Redux fetchMessages: received', messages.length, 'messages');
+      console.log('Redux fetchMessages: messages array:', JSON.stringify(messages, null, 2));
+      console.log('Redux fetchMessages: is array?', Array.isArray(messages));
+      if (messages.length > 0) {
+        console.log('Redux fetchMessages: first message:', JSON.stringify(messages[0], null, 2));
+      }
       return { conversationId, messages };
     } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to fetch messages');
+      console.error('Redux fetchMessages error:', error);
+      return rejectWithValue(error.response?.data?.message || error.message || 'Failed to fetch messages');
     }
   }
 );
@@ -69,7 +84,15 @@ export const sendMessage = createAsyncThunk(
       return { conversationId, message };
     } catch (error: any) {
       console.error('Send message error:', error);
-      return rejectWithValue(error.response?.data?.message || error.message || 'Failed to send message');
+      console.error('Error response data:', error.response?.data);
+      
+      // Prioritize the API's specific error message
+      const errorMessage = error.response?.data?.message 
+        || (error.message && !error.message.includes('Request failed with status code') ? error.message : null)
+        || 'Failed to send message';
+      
+      console.error('Extracted error message for rejectWithValue:', errorMessage);
+      return rejectWithValue(errorMessage);
     }
   }
 );
@@ -150,11 +173,21 @@ const messagesSlice = createSlice({
       .addCase(fetchMessages.fulfilled, (state, action) => {
         state.isLoading = false;
         const { conversationId, messages } = action.payload;
-        state.messages[conversationId] = messages;
+        console.log(`Redux reducer: Storing messages for conversation ${conversationId}`);
+        console.log(`Redux reducer: Messages payload:`, JSON.stringify(messages, null, 2));
+        console.log(`Redux reducer: Is array?`, Array.isArray(messages));
+        console.log(`Redux reducer: Messages length:`, messages?.length || 0);
+        
+        // Ensure messages is always an array
+        state.messages[conversationId] = Array.isArray(messages) ? messages : [];
+        console.log(`Redux reducer: Stored ${state.messages[conversationId].length} messages for conversation ${conversationId}`);
+        console.log(`Redux reducer: Stored messages:`, JSON.stringify(state.messages[conversationId], null, 2));
       })
       .addCase(fetchMessages.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
+        // Don't clear existing messages on error - keep what we have
+        // This allows messages to persist even if a poll fails
       })
       .addCase(sendMessage.fulfilled, (state, action) => {
         const { conversationId, message } = action.payload;

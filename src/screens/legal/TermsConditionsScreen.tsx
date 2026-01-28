@@ -122,7 +122,7 @@ const TermsConditionsScreen: React.FC = () => {
                 }
               ]}
             >
-              <Text style={styles.lastUpdated}>Last Updated: December 2024</Text>
+              <Text style={styles.lastUpdated}>Last Updated: January 14, 2026</Text>
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>1. Acceptance of Terms</Text>
@@ -136,7 +136,7 @@ const TermsConditionsScreen: React.FC = () => {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>2. Description of Service</Text>
                 <Text style={styles.sectionText}>
-                  CMU TalentHub is a platform that connects Carnegie Mellon University students with 
+                  CMU TalentHub is a platform that connects  students with 
                   job opportunities and allows businesses to discover talented students. The service 
                   includes:
                 </Text>
@@ -156,7 +156,7 @@ const TermsConditionsScreen: React.FC = () => {
                 <Text style={styles.bulletPoint}>• Maintain the security of your account credentials</Text>
                 <Text style={styles.bulletPoint}>• Notify us immediately of any unauthorized use</Text>
                 <Text style={styles.bulletPoint}>• Accept responsibility for all activities under your account</Text>
-                <Text style={styles.bulletPoint}>• Be at least 18 years old or have parental consent</Text>
+                {/* <Text style={styles.bulletPoint}>• Be at least 18 years old or have parental consent</Text> */}
               </View>
 
               <View style={styles.section}>
@@ -213,7 +213,7 @@ const TermsConditionsScreen: React.FC = () => {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>9. Limitation of Liability</Text>
                 <Text style={styles.sectionText}>
-                  CMU TalentHub and Carnegie Mellon University shall not be liable for any indirect, 
+                  CMU TalentHub shall not be liable for any indirect, 
                   incidental, special, consequential, or punitive damages arising from your use of 
                   the service.
                 </Text>
@@ -236,23 +236,20 @@ const TermsConditionsScreen: React.FC = () => {
                 </Text>
               </View>
 
-              <View style={styles.section}>
+              {/* <View style={styles.section}>
                 <Text style={styles.sectionTitle}>12. Governing Law</Text>
                 <Text style={styles.sectionText}>
                   These terms are governed by the laws of the Commonwealth of Pennsylvania. Any 
                   disputes shall be resolved in the courts of Allegheny County, Pennsylvania.
                 </Text>
-              </View>
+              </View> */}
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>13. Contact Information</Text>
                 <Text style={styles.sectionText}>
                   For questions about these Terms and Conditions, please contact us at:
                 </Text>
-                <Text style={styles.contactInfo}>Email: legal@cmutalenthub.com</Text>
-                <Text style={styles.contactInfo}>Phone: (412) 268-2000</Text>
-                <Text style={styles.contactInfo}>Address: Carnegie Mellon University</Text>
-                <Text style={styles.contactInfo}>5000 Forbes Avenue, Pittsburgh, PA 15213</Text>
+                <Text style={styles.contactInfo}>Email: mapepapro@gmail.com</Text>
               </View>
             </Animated.View>
           </ScrollView>
@@ -361,9 +358,9 @@ const styles = StyleSheet.create({
   },
   contactInfo: {
     fontSize: 14,
-    color: '#8F1A27',
-    fontWeight: '600',
+    color: '#333',
     marginBottom: 4,
+    marginTop: 4,
   },
   backgroundElements: {
     position: 'absolute',

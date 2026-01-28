@@ -86,7 +86,7 @@ export default function TalentDetailScreen() {
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
     if (filePath.startsWith('http')) return filePath;
-    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'http://192.168.0.106:3001';
+    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'https://web-production-11221.up.railway.app';
     return `${baseUrl}${filePath}`;
   };
 
@@ -246,29 +246,41 @@ export default function TalentDetailScreen() {
     }
   };
 
+  // Get files in reverse order (newest first) - when talent is updated, new files are appended
+  // So reversing gives us newest files first, followed by older files
+  const getFilesNewestFirst = (files: string[] | undefined | null): string[] => {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return [];
+    }
+    // Reverse to show newest files first (new files are appended to the end)
+    return [...files].reverse();
+  };
+
+  const talentFiles = getFilesNewestFirst(talent.files);
+
   const nextFile = () => {
-    if (talent.files && talent.files.length > 0) {
+    if (talentFiles.length > 0) {
       if (videoRef.current) {
         videoRef.current.pauseAsync();
       }
-      setCurrentFileIndex((prev) => (prev + 1) % talent.files.length);
+      setCurrentFileIndex((prev) => (prev + 1) % talentFiles.length);
       setIsVideoPlaying(false);
       setIsPlaying(false);
     }
   };
 
   const previousFile = () => {
-    if (talent.files && talent.files.length > 0) {
+    if (talentFiles.length > 0) {
       if (videoRef.current) {
         videoRef.current.pauseAsync();
       }
-      setCurrentFileIndex((prev) => (prev - 1 + talent.files.length) % talent.files.length);
+      setCurrentFileIndex((prev) => (prev - 1 + talentFiles.length) % talentFiles.length);
       setIsVideoPlaying(false);
       setIsPlaying(false);
     }
   };
 
-  const currentFile = talent.files && talent.files.length > 0 ? talent.files[currentFileIndex] : null;
+  const currentFile = talentFiles.length > 0 ? talentFiles[currentFileIndex] : null;
 
   // Auto-play video when file changes
   useEffect(() => {
@@ -403,13 +415,13 @@ export default function TalentDetailScreen() {
         </View>
 
         {/* Media Files */}
-        {talent.files && talent.files.length > 0 && (
+        {talentFiles.length > 0 && (
           <View style={styles.mediaCard}>
             <View style={styles.mediaHeader}>
               <Text style={styles.mediaTitle}>Media</Text>
-              {talent.files.length > 1 && (
+              {talentFiles.length > 1 && (
                 <Text style={styles.fileCounter}>
-                  {currentFileIndex + 1} / {talent.files.length}
+                  {currentFileIndex + 1} / {talentFiles.length}
                 </Text>
               )}
             </View>
@@ -497,7 +509,7 @@ export default function TalentDetailScreen() {
                     )}
 
                     {/* Navigation Controls */}
-                    {talent.files.length > 1 && (
+                    {talentFiles.length > 1 && (
                       <View style={styles.navigationControls}>
                         <TouchableOpacity
                           onPress={previousFile}
@@ -527,7 +539,7 @@ export default function TalentDetailScreen() {
                   style={styles.thumbnailsContainer}
                   contentContainerStyle={styles.thumbnailsContent}
                 >
-                  {talent.files.map((file, index) => (
+                  {talentFiles.map((file, index) => (
                     <TouchableOpacity
                       key={index}
                       onPress={() => {
@@ -696,7 +708,7 @@ export default function TalentDetailScreen() {
                       </View>
 
                       {/* Media Indicator */}
-                      {talent.files.length > 1 && (
+                      {talentFiles.length > 1 && (
                         <View style={styles.reelIndicator}>
                           {talent.files.map((_, idx) => (
                             <View
@@ -883,20 +895,39 @@ export default function TalentDetailScreen() {
                       setMessageText('');
                     } catch (error: any) {
                       console.error('Failed to send message:', error);
+                      console.error('Error type:', typeof error);
+                      console.error('Error structure:', JSON.stringify(error, null, 2));
+                      
+                      // Extract error message with priority: string from rejectWithValue > API response message > error.message > status-based fallback
                       let errorMessage = 'Failed to send message.';
-                      if (error.message) {
+                      
+                      // When .unwrap() throws from a rejected thunk, it throws the value from rejectWithValue (which is a string)
+                      if (typeof error === 'string') {
+                        errorMessage = error;
+                      }
+                      // Handle Axios error objects (from direct API calls, not thunks)
+                      else if (error.response?.data?.message) {
+                        errorMessage = error.response.data.message;
+                      } else if (error.message && !error.message.includes('Request failed with status code')) {
+                        // Use error.message only if it's not a generic Axios error message
                         errorMessage = error.message;
                       } else if (error.response?.status === 401) {
                         errorMessage = 'You are not authenticated. Please log out and log back in.';
                       } else if (error.response?.status === 403) {
-                        errorMessage = 'You are not authorized to send messages.';
+                        // For 403, check if there's a more specific message in the response
+                        errorMessage = error.response?.data?.message || 'You are not authorized to send messages.';
                       } else if (error.response?.status === 404) {
                         errorMessage = 'Recipient not found.';
                       } else if (error.response?.status === 400) {
-                        errorMessage = 'Invalid request. Please check your message.';
+                        errorMessage = error.response?.data?.message || 'Invalid request. Please check your message.';
                       }
+                      
+                      console.log('Final error message to display:', errorMessage);
+                      
+                      // Show error toast and keep modal closed to avoid overlapping modals
                       showToast(errorMessage, 'error');
-                      setShowMessageModal(true);
+                      // Don't re-open modal immediately - let user see the error first
+                      // User can manually open the modal again if they want to retry
                     }
                   }}
                   style={styles.messageModalSendButton}

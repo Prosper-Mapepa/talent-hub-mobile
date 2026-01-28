@@ -128,10 +128,11 @@ export default function AddTalentScreen() {
       // Refresh the talents list to ensure latest data
       await dispatch(fetchAllTalents());
       
-      showToast('Talent added successfully!', 'success', {
-        text: 'OK',
-        onPress: () => navigation.goBack()
-      });
+      // Show success message
+      showToast('Talent added successfully!', 'success');
+      
+      // Navigate back immediately after successful submission
+      navigation.goBack();
     } catch (error) {
       showToast('Failed to add talent. Please try again.', 'error');
     }

@@ -21,11 +21,13 @@ import { Job, UserRole } from '../../types';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const JobsScreen: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useAppSelector(state => state.auth);
   const { jobs, isLoading, error } = useAppSelector(state => state.jobs);
+  const insets = useSafeAreaInsets();
   console.log('jobs', jobs);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedJobType, setSelectedJobType] = useState('all');
@@ -221,19 +223,19 @@ const JobsScreen: React.FC = () => {
     <Modal
       visible={showFilters}
       animationType="slide"
-      transparent={true}
+      transparent={false}
       onRequestClose={() => setShowFilters(false)}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
+          <View style={[styles.modalHeader, { paddingTop: Math.max(insets.top, 16) }]}>
             <Text style={styles.modalTitle}>Filters</Text>
             <TouchableOpacity onPress={() => setShowFilters(false)}>
               <Ionicons name="close" size={24} color="#000" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.filterContent}>
+          <ScrollView style={styles.filterContent} showsVerticalScrollIndicator={false}>
             <View style={styles.filterSection}>
               <Text style={styles.filterLabel}>Job Type</Text>
               {['all', 'FULL_TIME', 'PART_TIME', 'INTERNSHIP', 'CONTRACT'].map(type => (
@@ -298,7 +300,7 @@ const JobsScreen: React.FC = () => {
             </View>
           </ScrollView>
 
-          <View style={styles.modalFooter}>
+          <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             <TouchableOpacity style={styles.clearButton} onPress={clearFilters}>
               <Text style={styles.clearButtonText}>Clear Filters</Text>
             </TouchableOpacity>
@@ -732,6 +734,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
+    paddingTop: 3,
   },
   loadingContainer: {
     flex: 1,
@@ -797,14 +800,11 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: '#FFFFFF',
   },
   modalContent: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',

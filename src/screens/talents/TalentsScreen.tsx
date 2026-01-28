@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
-import { fetchAllTalents } from '../../store/slices/talentsSlice';
+import { fetchAllTalents, deleteTalent } from '../../store/slices/talentsSlice';
 import { createConversation, sendMessage } from '../../store/slices/messagesSlice';
 import { Talent } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -28,7 +28,7 @@ import { Badge } from '../../components/ui/badge';
 import { Alert as AlertComponent, AlertDescription } from '../../components/ui/alert';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, Audio } from 'expo-av';
 import { COLORS } from '../../theme/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { apiService } from '../../services/api';
@@ -52,6 +52,11 @@ export default function TalentsScreen() {
   const [viewMode, setViewMode] = useState<'grid' | 'feed'>('feed');
   const [likedTalents, setLikedTalents] = useState<Set<string>>(new Set());
   const [savedTalents, setSavedTalents] = useState<Set<string>>(new Set());
+  const [talentLikesCount, setTalentLikesCount] = useState<Map<string, number>>(new Map());
+  const [showLikesModal, setShowLikesModal] = useState(false);
+  const [currentTalentLikes, setCurrentTalentLikes] = useState<any[]>([]);
+  const [currentTalentId, setCurrentTalentId] = useState<string | null>(null);
+  const [isLoadingLikes, setIsLoadingLikes] = useState(false);
   const [showStories, setShowStories] = useState(true);
   const [scaleAnimations] = useState(() => new Map<string, Animated.Value>());
   const [heartBurstAnimations] = useState(() => new Map<string, { scale: Animated.Value; opacity: Animated.Value; rotation: Animated.Value }>());
@@ -67,6 +72,7 @@ export default function TalentsScreen() {
   const [playingVideos, setPlayingVideos] = useState<Set<string>>(new Set());
   const [followingStatus, setFollowingStatus] = useState<Map<string, boolean>>(new Map());
   const [followLoading, setFollowLoading] = useState<Set<string>>(new Set());
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   
   // Custom modal states for messaging
   const [showMessageModal, setShowMessageModal] = useState(false);
@@ -81,6 +87,7 @@ export default function TalentsScreen() {
   const [selectedReelTalent, setSelectedReelTalent] = useState<Talent | null>(null);
   const [selectedReelIndex, setSelectedReelIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
+  const reelVideoRefs = useRef<Map<number, any>>(new Map());
   const [reelLastTap, setReelLastTap] = useState<{ timestamp: number } | null>(null);
   
   // Stories viewer states
@@ -92,7 +99,9 @@ export default function TalentsScreen() {
   const [storyProgress, setStoryProgress] = useState(0);
   const storyProgressRef = useRef<Animated.Value>(new Animated.Value(0));
   const storyTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const STORY_DURATION = 5000; // 5 seconds per story
+  const storyVideoRef = useRef<any>(null);
+  const [currentMediaDuration, setCurrentMediaDuration] = useState(5000); // Default 5 seconds for images
+  const STORY_DURATION = 5000; // Default 5 seconds for images
 
   // Initialize scale animations for each talent
   useEffect(() => {
@@ -121,7 +130,28 @@ export default function TalentsScreen() {
     });
   }, [talents, scaleAnimations, heartBurstAnimations, heartParticles]);
 
-  // Reset story timer when talent index changes
+  // Reset media duration when file changes
+  useEffect(() => {
+    if (!storiesModalVisible) return;
+    
+    const userArray = Array.from(storiesByUser.keys());
+    if (userArray.length === 0) return;
+    
+    const currentUserTalents = storiesByUser.get(userArray[currentUserIndex]) || [];
+    const currentTalent = currentUserTalents[currentTalentIndex];
+    if (!currentTalent) return;
+    
+    const files = getFilesNewestFirst(currentTalent.files);
+    const currentFile = files.length > 0 && currentFileIndex < files.length ? files[currentFileIndex] : null;
+    const isVideo = currentFile ? isVideoFile(currentFile) : false;
+    
+    // Reset duration to default for images (will be updated by onLoad for videos)
+    if (!isVideo) {
+      setCurrentMediaDuration(STORY_DURATION);
+    }
+  }, [currentFileIndex, currentTalentIndex, currentUserIndex, storiesModalVisible]);
+
+  // Reset story timer when file, talent, user index, or media duration changes
   useEffect(() => {
     if (storiesModalVisible) {
       startStoryTimer();
@@ -129,9 +159,10 @@ export default function TalentsScreen() {
     return () => {
       if (storyTimerRef.current) {
         clearTimeout(storyTimerRef.current);
+        storyTimerRef.current = null;
       }
     };
-  }, [currentTalentIndex, currentUserIndex, storiesModalVisible]);
+  }, [currentFileIndex, currentTalentIndex, currentUserIndex, storiesModalVisible, currentMediaDuration]);
 
   // Load user's liked and saved talents on mount
   useEffect(() => {
@@ -146,7 +177,9 @@ export default function TalentsScreen() {
       setLikedTalents(new Set());
       setSavedTalents(new Set());
     }
-  }, [user?.studentId]);
+    // Load blocked users
+    loadBlockedUsers();
+  }, [user?.studentId, user?.id]);
 
   const loadUserPreferences = async () => {
     try {
@@ -191,12 +224,35 @@ export default function TalentsScreen() {
     }
   };
 
-  // Filter talents based on search and filter
+  // Load blocked users
+  const loadBlockedUsers = async () => {
+    try {
+      if (user?.id) {
+        const blocked = await apiService.getBlockedUsers();
+        const blockedIds = new Set(
+          blocked.map((block: any) => block.blockedUserId || block.blocked_user_id || block.id)
+        );
+        setBlockedUserIds(blockedIds);
+        console.log(`Loaded ${blockedIds.size} blocked users`);
+      }
+    } catch (error: any) {
+      console.error('Error loading blocked users:', error);
+      // Don't throw, just continue without filtering
+    }
+  };
+
+  // Filter talents based on search, filter, and blocked users
   const filteredTalents = React.useMemo(() => {
     const talentsArray = Array.isArray(talents) ? talents : [];
-    console.log(`Filtering ${talentsArray.length} talents. Search: "${searchTerm}", Filter: "${selectedFilter}"`);
+    console.log(`Filtering ${talentsArray.length} talents. Search: "${searchTerm}", Filter: "${selectedFilter}", Blocked: ${blockedUserIds.size}`);
     
     return talentsArray.filter((talent) => {
+      // Filter out talents from blocked users
+      const talentUserId = talent.student?.user?.id || talent.student?.userId;
+      if (talentUserId && blockedUserIds.has(talentUserId)) {
+        return false;
+      }
+
       const matchesSearch = !searchTerm.trim() || 
                            talent.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            talent.description?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -204,7 +260,7 @@ export default function TalentsScreen() {
                            talent.category?.toLowerCase() === selectedFilter.toLowerCase();
       return matchesSearch && matchesFilter;
     });
-  }, [talents, searchTerm, selectedFilter]);
+  }, [talents, searchTerm, selectedFilter, blockedUserIds]);
 
   // Get unique talent categories for filtering
   const talentCategories = ['all', ...Array.from(new Set((talents || []).map(t => t.category)))];
@@ -226,17 +282,61 @@ export default function TalentsScreen() {
     loadTalents();
   }, [dispatch]);
 
+  // Load likes counts when talents change - use talent IDs as dependency to prevent infinite loops
+  const talentIds = React.useMemo(() => {
+    return talents?.map(t => t.id).sort().join(',') || '';
+  }, [talents]);
+
+  useEffect(() => {
+    if (!talents || talents.length === 0 || !talentIds) return;
+    
+    let isMounted = true;
+    
+    const loadLikes = async () => {
+      try {
+        const likesPromises = talents.map(async (talent) => {
+          try {
+            const result = await apiService.getTalentLikes(talent.id);
+            return { talentId: talent.id, count: result.count };
+          } catch (error) {
+            console.error(`Error loading likes for talent ${talent.id}:`, error);
+            return { talentId: talent.id, count: 0 };
+          }
+        });
+        
+        const likesResults = await Promise.all(likesPromises);
+        
+        if (isMounted) {
+          const newLikesMap = new Map<string, number>();
+          likesResults.forEach(({ talentId, count }) => {
+            newLikesMap.set(talentId, count);
+          });
+          setTalentLikesCount(newLikesMap);
+        }
+      } catch (error) {
+        console.error('Error loading talent likes counts:', error);
+      }
+    };
+    
+    loadLikes();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [talentIds]); // Only depend on talentIds string to prevent infinite loops
+
   // Refresh talents when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       console.log('TalentsScreen: Screen focused, refreshing talents...');
       loadTalents();
-    }, [dispatch]) // Include dispatch in dependencies
+      loadBlockedUsers(); // Also refresh blocked users list
+    }, [dispatch]) // Remove talents from dependencies to prevent infinite loops
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadTalents();
+    await Promise.all([loadTalents(), loadBlockedUsers()]);
     setRefreshing(false);
   };
 
@@ -353,6 +453,30 @@ export default function TalentsScreen() {
     }
   };
 
+  // Handle showing likes modal
+  const handleShowLikes = async (talentId: string) => {
+    setCurrentTalentId(talentId);
+    setShowLikesModal(true);
+    setIsLoadingLikes(true);
+    
+    try {
+      const result = await apiService.getTalentLikes(talentId);
+      setCurrentTalentLikes(result.users || []);
+      
+      // Update the count in the map
+      setTalentLikesCount(prev => {
+        const newMap = new Map(prev);
+        newMap.set(talentId, result.count);
+        return newMap;
+      });
+    } catch (error) {
+      console.error('Error loading likes:', error);
+      setCurrentTalentLikes([]);
+    } finally {
+      setIsLoadingLikes(false);
+    }
+  };
+
   const handleLikeTalent = async (talentId: string) => {
     console.log('handleLikeTalent called with talentId:', talentId);
     console.log('Current user object:', user);
@@ -360,6 +484,14 @@ export default function TalentsScreen() {
     
     const isCurrentlyLiked = likedTalents.has(talentId);
     const willBeLiked = !isCurrentlyLiked;
+    
+    // Optimistically update likes count
+    setTalentLikesCount(prev => {
+      const newMap = new Map(prev);
+      const currentCount = newMap.get(talentId) || 0;
+      newMap.set(talentId, willBeLiked ? currentCount + 1 : Math.max(0, currentCount - 1));
+      return newMap;
+    });
     
     // Trigger heart burst animation only when liking (not unliking)
     if (willBeLiked) {
@@ -416,11 +548,30 @@ export default function TalentsScreen() {
         const isLiked = !isCurrentlyLiked;
         console.log('Calling likeTalent API with:', { studentId: user.studentId, talentId, isLiked });
         await apiService.likeTalent(user.studentId, talentId, isLiked);
+        
+        // Refresh the actual likes count from the server
+        try {
+          const result = await apiService.getTalentLikes(talentId);
+          setTalentLikesCount(prev => {
+            const newMap = new Map(prev);
+            newMap.set(talentId, result.count);
+            return newMap;
+          });
+        } catch (error) {
+          console.error('Error refreshing likes count:', error);
+        }
       } else {
         console.log('No studentId found in user object');
       }
     } catch (error) {
       console.error('Failed to toggle like:', error);
+      // Revert optimistic update on error
+      setTalentLikesCount(prev => {
+        const newMap = new Map(prev);
+        const currentCount = newMap.get(talentId) || 0;
+        newMap.set(talentId, isCurrentlyLiked ? currentCount : Math.max(0, currentCount - 1));
+        return newMap;
+      });
       showToast('Failed to like talent.', 'error');
     }
   };
@@ -500,7 +651,7 @@ export default function TalentsScreen() {
     }
   };
 
-  const handleShareTalent = (talent: Talent) => {
+const handleShareTalent = (talent: Talent) => {
     Alert.alert(
       'Share Talent',
       'Share this amazing talent with others!',
@@ -515,12 +666,42 @@ export default function TalentsScreen() {
         },
         { 
           text: 'View Profile', 
-          onPress: () => navigation.navigate('StudentProfile', { student: talent.student })
+          onPress: () => {
+            if (talent.student?.id) {
+              navigation.navigate('StudentProfile', { studentId: talent.student.id });
+            }
+          }
         },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
   };
+
+const showDeleteTalentConfirm = (talent: Talent, dispatch: AppDispatch) => {
+  Alert.alert(
+    'Delete Talent',
+    'Are you sure you want to delete this talent?',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await dispatch(deleteTalent({
+              studentId: talent.studentId,
+              talentId: talent.id,
+            })).unwrap();
+            showToast('Talent deleted successfully!', 'success');
+          } catch (error) {
+            console.error('Error deleting talent:', error);
+            showToast('Failed to delete talent', 'error');
+          }
+        },
+      },
+    ],
+  );
+};
 
   const handleCollaborate = async (talent: Talent) => {
     // Check if user is trying to collaborate with themselves
@@ -572,12 +753,13 @@ export default function TalentsScreen() {
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
     if (filePath.startsWith('http')) return filePath;
-    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'http://192.168.0.106:3001';
+    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'https://web-production-11221.up.railway.app';
     return `${baseUrl}${filePath}`;
   };
 
   const renderStoryItem = (talent: Talent) => {
-    const firstFile = talent.files && talent.files.length > 0 ? talent.files[0] : null;
+    const files = getFilesNewestFirst(talent.files);
+    const firstFile = files.length > 0 ? files[0] : null;
     const isVideo = firstFile ? isVideoFile(firstFile) : false;
     
     return (
@@ -723,10 +905,39 @@ export default function TalentsScreen() {
     checkFollowStatuses();
   }, [talents, user?.id, dispatch]);
 
-  const openReelViewer = (talent: Talent, index: number = 0) => {
+  const openReelViewer = async (talent: Talent, index: number = 0) => {
+    // Configure audio to play through device speakers
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error('Error setting audio mode:', error);
+    }
+    
+    // Clear previous video refs
+    reelVideoRefs.current.clear();
+    
     setSelectedReelTalent(talent);
     setSelectedReelIndex(index);
     setReelModalVisible(true);
+    
+    // Auto-play the first video if it's a video file
+    setTimeout(async () => {
+      if (talent.files && talent.files.length > 0 && isVideoFile(talent.files[index])) {
+        const videoRef = reelVideoRefs.current.get(index);
+        if (videoRef) {
+          try {
+            await videoRef.playAsync();
+          } catch (error) {
+            console.error('Error auto-playing video:', error);
+          }
+        }
+      }
+    }, 300);
   };
 
   const openStoriesViewer = (talent: Talent) => {
@@ -768,7 +979,7 @@ export default function TalentsScreen() {
     startStoryTimer();
   };
 
-  const startStoryTimer = () => {
+  const startStoryTimer = (duration: number = currentMediaDuration) => {
     if (storyTimerRef.current) {
       clearTimeout(storyTimerRef.current);
     }
@@ -778,14 +989,14 @@ export default function TalentsScreen() {
     // Animate progress bar
     Animated.timing(storyProgressRef.current, {
       toValue: 1,
-      duration: STORY_DURATION,
+      duration: duration,
       useNativeDriver: false,
     }).start();
     
     // Auto-advance to next file
     storyTimerRef.current = setTimeout(() => {
       nextFile();
-    }, STORY_DURATION);
+    }, duration);
   };
 
   const nextFile = () => {
@@ -797,21 +1008,19 @@ export default function TalentsScreen() {
     
     if (!currentTalent) return;
     
-    const files = currentTalent.files || [];
+    const files = getFilesNewestFirst(currentTalent.files);
     
     if (currentFileIndex < files.length - 1) {
       // Next file in current talent
       setCurrentFileIndex(currentFileIndex + 1);
       setStoryProgress(0);
       storyProgressRef.current.setValue(0);
-      startStoryTimer();
     } else if (currentTalentIndex < currentUserTalents.length - 1) {
       // Next talent from same user
       setCurrentTalentIndex(currentTalentIndex + 1);
       setCurrentFileIndex(0);
       setStoryProgress(0);
       storyProgressRef.current.setValue(0);
-      startStoryTimer();
     } else {
       // End of current user's talents - don't auto-advance to next user
       closeStoriesViewer();
@@ -827,7 +1036,7 @@ export default function TalentsScreen() {
     
     if (!currentTalent) return;
     
-    const files = currentTalent.files || [];
+    const files = getFilesNewestFirst(currentTalent.files);
     
     if (currentFileIndex > 0) {
       // Previous file in current talent
@@ -839,7 +1048,7 @@ export default function TalentsScreen() {
       // Previous talent from same user
       setCurrentTalentIndex(currentTalentIndex - 1);
       const prevTalent = currentUserTalents[currentTalentIndex - 1];
-      const prevFiles = prevTalent?.files || [];
+      const prevFiles = getFilesNewestFirst(prevTalent?.files);
       setCurrentFileIndex(prevFiles.length > 0 ? prevFiles.length - 1 : 0);
       setStoryProgress(0);
       storyProgressRef.current.setValue(0);
@@ -887,8 +1096,19 @@ export default function TalentsScreen() {
     return videoExtensions.some(ext => filePath.toLowerCase().includes(ext));
   };
 
+  // Get files in reverse order (newest first) - when talent is updated, new files are appended
+  // So reversing gives us newest files first, followed by older files
+  const getFilesNewestFirst = (files: string[] | undefined | null): string[] => {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return [];
+    }
+    // Reverse to show newest files first (new files are appended to the end)
+    return [...files].reverse();
+  };
+
   const renderTalentCard = (talent: Talent) => {
-    const firstFile = talent.files && talent.files.length > 0 ? talent.files[0] : null;
+    const files = getFilesNewestFirst(talent.files);
+    const firstFile = files.length > 0 ? files[0] : null;
     const studentName = talent.student ? `${talent.student.firstName} ${talent.student.lastName}` : 'Unknown Student';
     const isLiked = likedTalents.has(talent.id);
     const isSaved = savedTalents.has(talent.id);
@@ -917,7 +1137,9 @@ export default function TalentsScreen() {
             style={styles.userInfo}
             onPress={(e) => {
               e.stopPropagation();
-              navigation.navigate('StudentProfile', { student: talent.student });
+              if (talent.student?.id) {
+                navigation.navigate('StudentProfile', { studentId: talent.student.id });
+              }
             }}
             activeOpacity={0.7}
           >
@@ -1116,9 +1338,23 @@ export default function TalentsScreen() {
                   color={isLiked ? "#ef4444" : "#6b7280"} 
                 />
               </Animated.View>
-              {likedTalents.has(talent.id) && (
-                <Text style={styles.actionCount}>1</Text>
-              )}
+              {(() => {
+                const likesCount = talentLikesCount.get(talent.id) || 0;
+                if (likesCount > 0) {
+                  return (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleShowLikes(talent.id);
+                      }}
+                      style={{ marginLeft: 4 }}
+                    >
+                      <Text style={styles.actionCount}>{likesCount}</Text>
+                    </Pressable>
+                  );
+                }
+                return null;
+              })()}
             </Pressable>
             
             <Pressable
@@ -1202,14 +1438,7 @@ export default function TalentsScreen() {
               variant="outline"
               onPress={(e) => {
                 e.stopPropagation();
-                Alert.alert(
-                  'Delete Talent',
-                  'Are you sure you want to delete this talent?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive' },
-                  ]
-                );
+                showDeleteTalentConfirm(talent, dispatch);
               }}
               style={styles.deleteButton}
             >
@@ -1281,9 +1510,15 @@ export default function TalentsScreen() {
 
       {/* Stories Section */}
       {showStories && (() => {
-        // Get unique students from talents (for stories)
+        // Get unique students from talents (for stories), excluding blocked users
         const uniqueStudents = new Map<string, Talent>();
         (talents || []).forEach(talent => {
+          // Filter out talents from blocked users
+          const talentUserId = talent.student?.user?.id || talent.student?.userId;
+          if (talentUserId && blockedUserIds.has(talentUserId)) {
+            return; // Skip blocked users
+          }
+          
           if (talent.student && talent.student.id && !uniqueStudents.has(talent.student.id)) {
             uniqueStudents.set(talent.student.id, talent);
           }
@@ -1499,13 +1734,19 @@ export default function TalentsScreen() {
                       console.log('Conversation created successfully with ID:', conversation.id);
                     } catch (convError: any) {
                       console.error('Error creating conversation:', convError);
+                      
+                      // Handle string errors (from thunk rejectWithValue)
+                      const errorMessage = typeof convError === 'string' 
+                        ? convError 
+                        : (convError?.response?.data?.message || convError?.message || 'Failed to create conversation. Please try again.');
+                      
                       // Check if error is because conversation already exists
-                      if (convError?.response?.status === 409 || convError?.message?.includes('already exists')) {
+                      if (convError?.response?.status === 409 || errorMessage.includes('already exists')) {
                         // Try to fetch existing conversations and find the one with this participant
                         // For now, just show a helpful error
                         throw new Error('A conversation already exists. Please check your Messages tab.');
                       }
-                      throw new Error(convError?.message || 'Failed to create conversation. Please try again.');
+                      throw new Error(errorMessage);
                     }
                     
                     // Send the message
@@ -1536,20 +1777,39 @@ export default function TalentsScreen() {
                     setShowMessageModal(false);
                   } catch (error: any) {
                     console.error('Failed to send message:', error);
+                    console.error('Error type:', typeof error);
+                    console.error('Error structure:', JSON.stringify(error, null, 2));
+                    
+                    // Extract error message with priority: string from rejectWithValue > API response message > error.message > status-based fallback
                     let errorMessage = 'Failed to send message.';
-                    if (error.message) {
+                    
+                    // When .unwrap() throws from a rejected thunk, it throws the value from rejectWithValue (which is a string)
+                    if (typeof error === 'string') {
+                      errorMessage = error;
+                    }
+                    // Handle Axios error objects (from direct API calls, not thunks)
+                    else if (error.response?.data?.message) {
+                      errorMessage = error.response.data.message;
+                    } else if (error.message && !error.message.includes('Request failed with status code')) {
+                      // Use error.message only if it's not a generic Axios error message
                       errorMessage = error.message;
                     } else if (error.response?.status === 401) {
                       errorMessage = 'You are not authenticated. Please log out and log back in.';
                     } else if (error.response?.status === 403) {
-                      errorMessage = 'You are not authorized to send messages.';
+                      // For 403, check if there's a more specific message in the response
+                      errorMessage = error.response?.data?.message || 'You are not authorized to send messages.';
                     } else if (error.response?.status === 404) {
                       errorMessage = 'Recipient not found.';
                     } else if (error.response?.status === 400) {
-                      errorMessage = 'Invalid request. Please check your message.';
+                      errorMessage = error.response?.data?.message || 'Invalid request. Please check your message.';
                     }
+                    
+                    console.log('Final error message to display:', errorMessage);
+                    
+                    // Show error toast and keep modal closed to avoid overlapping modals
                     showToast(errorMessage, 'error');
-                    setShowMessageModal(true); // Re-open modal on error
+                    // Don't re-open modal immediately - let user see the error first
+                    // User can manually open the modal again if they want to retry
                   } finally {
                     setIsSendingMessage(false);
                   }
@@ -1567,6 +1827,89 @@ export default function TalentsScreen() {
           </View>
         </View>
       )}
+
+      {/* Likes Modal */}
+      <Modal
+        visible={showLikesModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowLikesModal(false)}
+      >
+        <View style={styles.likesModalOverlay}>
+          <View style={styles.likesModalContainer}>
+            <View style={styles.likesModalHeader}>
+              <Text style={styles.likesModalTitle}>Likes</Text>
+              <TouchableOpacity
+                onPress={() => setShowLikesModal(false)}
+                style={styles.likesModalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            
+            {isLoadingLikes ? (
+              <View style={styles.likesModalLoading}>
+                <ActivityIndicator size="large" color={COLORS.maroon} />
+              </View>
+            ) : currentTalentLikes.length === 0 ? (
+              <View style={styles.likesModalEmpty}>
+                <Ionicons name="heart-outline" size={64} color="#d1d5db" />
+                <Text style={styles.likesModalEmptyText}>No likes yet</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={currentTalentLikes}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => {
+                  const studentName = item.firstName && item.lastName
+                    ? `${item.firstName} ${item.lastName}`
+                    : item.user?.firstName && item.user?.lastName
+                    ? `${item.user.firstName} ${item.user.lastName}`
+                    : item.email || 'Unknown User';
+                  
+                  const profileImage = item.profileImage || item.user?.profileImage;
+                  
+                  return (
+                    <TouchableOpacity
+                      style={styles.likesModalItem}
+                      onPress={() => {
+                        setShowLikesModal(false);
+                        if (item.id) {
+                          navigation.navigate('StudentProfile', { studentId: item.id });
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.likesModalAvatar}>
+                        {profileImage ? (
+                          <Image
+                            source={{ uri: getFileUrl(profileImage) }}
+                            style={styles.likesModalAvatarImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.likesModalAvatarFallback}>
+                            <Text style={styles.likesModalAvatarText}>
+                              {studentName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.likesModalItemInfo}>
+                        <Text style={styles.likesModalItemName}>{studentName}</Text>
+                        {item.email && (
+                          <Text style={styles.likesModalItemEmail}>{item.email}</Text>
+                        )}
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Custom Collaboration Modal */}
       {showCollaborationModal && currentTalent && (
@@ -1680,7 +2023,7 @@ export default function TalentsScreen() {
           {selectedReelTalent && selectedReelTalent.files && selectedReelTalent.files.length > 0 && (
             <FlatList
               ref={flatListRef}
-              data={selectedReelTalent.files}
+              data={getFilesNewestFirst(selectedReelTalent.files)}
               pagingEnabled
               showsVerticalScrollIndicator={false}
               keyExtractor={(item, index) => `reel-${index}`}
@@ -1690,8 +2033,31 @@ export default function TalentsScreen() {
                 offset: height * index,
                 index,
               })}
-              onMomentumScrollEnd={(event) => {
+              onMomentumScrollEnd={async (event) => {
                 const index = Math.round(event.nativeEvent.contentOffset.y / height);
+                
+                // Pause previous video
+                if (selectedReelIndex !== index) {
+                  const prevVideoRef = reelVideoRefs.current.get(selectedReelIndex);
+                  if (prevVideoRef) {
+                    try {
+                      await prevVideoRef.pauseAsync();
+                    } catch (error) {
+                      console.error('Error pausing previous video:', error);
+                    }
+                  }
+                }
+                
+                // Play new video
+                const newVideoRef = reelVideoRefs.current.get(index);
+                if (newVideoRef && selectedReelTalent?.files && isVideoFile(selectedReelTalent.files[index])) {
+                  try {
+                    await newVideoRef.playAsync();
+                  } catch (error) {
+                    console.error('Error playing new video:', error);
+                  }
+                }
+                
                 setSelectedReelIndex(index);
               }}
               renderItem={({ item, index }) => {
@@ -1724,12 +2090,19 @@ export default function TalentsScreen() {
                     >
                       {isVideo ? (
                         <Video
+                          ref={(ref) => {
+                            if (ref) {
+                              reelVideoRefs.current.set(index, ref);
+                            } else {
+                              reelVideoRefs.current.delete(index);
+                            }
+                          }}
                           source={{ uri: getFileUrl(item) }}
                           style={styles.reelMedia}
                           useNativeControls={false}
                           resizeMode={ResizeMode.COVER}
-                          shouldPlay={true}
-                          isMuted={false}
+                          shouldPlay={selectedReelIndex === index}
+                          isMuted={selectedReelIndex !== index}
                           isLooping={true}
                         />
                       ) : (
@@ -1849,9 +2222,11 @@ export default function TalentsScreen() {
                       </View>
 
                       {/* Media Indicator */}
-                      {selectedReelTalent.files.length > 1 && (
-                        <View style={styles.reelIndicator}>
-                          {selectedReelTalent.files.map((_, idx) => (
+                      {(() => {
+                        const reelFiles = getFilesNewestFirst(selectedReelTalent.files);
+                        return reelFiles.length > 1 && (
+                          <View style={styles.reelIndicator}>
+                            {reelFiles.map((_: any, idx: number) => (
                             <View
                               key={idx}
                               style={[
@@ -1861,7 +2236,8 @@ export default function TalentsScreen() {
                             />
                           ))}
                         </View>
-                      )}
+                        );
+                      })()}
 
                       {/* Action Buttons */}
                       <View style={styles.reelActions}>
@@ -1969,8 +2345,8 @@ export default function TalentsScreen() {
                       {/* Progress Bars - Show all files from all talents */}
                       <View style={styles.storiesProgressContainer}>
                         {userTalents.flatMap((talent, talentIdx) => {
-                          const talentFiles = talent.files || [];
-                          return talentFiles.map((_, fileIdx) => {
+                          const talentFiles = getFilesNewestFirst(talent.files);
+                          return talentFiles.map((_: any, fileIdx: number) => {
                             const globalIndex = userTalents.slice(0, talentIdx).reduce((sum, t) => sum + (t.files?.length || 0), 0) + fileIdx;
                             const isCurrent = talentIdx === currentTalentIndex && fileIdx === currentFileIndex;
                             const isPast = talentIdx < currentTalentIndex || (talentIdx === currentTalentIndex && fileIdx < currentFileIndex);
@@ -2003,9 +2379,13 @@ export default function TalentsScreen() {
                       {/* Close Button */}
                       <TouchableOpacity
                         style={styles.storiesCloseButton}
-                        onPress={closeStoriesViewer}
+                        onPress={(e) => {
+                          // Prevent taps from falling through to the user header (which navigates to profile)
+                          e.stopPropagation?.();
+                          closeStoriesViewer();
+                        }}
                       >
-                        <Ionicons name="close" size={28} color="white" />
+                        <Ionicons name="close" size={40} color="white" />
                       </TouchableOpacity>
                       
                       {/* Media Content */}
@@ -2024,13 +2404,28 @@ export default function TalentsScreen() {
                         {currentFile ? (
                           isVideo ? (
                             <Video
+                              ref={(ref) => {
+                                storyVideoRef.current = ref;
+                              }}
                               source={{ uri: getFileUrl(currentFile) }}
                               style={styles.storiesMedia}
                               useNativeControls={false}
-                              resizeMode={ResizeMode.COVER}
+                              resizeMode={ResizeMode.CONTAIN}
                               shouldPlay={true}
                               isMuted={false}
                               isLooping={false}
+                              onLoad={async () => {
+                                if (storyVideoRef.current) {
+                                  try {
+                                    const status = await storyVideoRef.current.getStatusAsync();
+                                    if (status.isLoaded && status.durationMillis) {
+                                      setCurrentMediaDuration(status.durationMillis);
+                                    }
+                                  } catch (error) {
+                                    console.error('Error getting video status:', error);
+                                  }
+                                }
+                              }}
                             />
                           ) : (
                             <Image
@@ -2046,8 +2441,75 @@ export default function TalentsScreen() {
                         )}
                       </TouchableOpacity>
                       
+                      {/* Heart burst animation overlay */}
+                      {(() => {
+                        const burstAnim = heartBurstAnimations.get(currentTalent.id);
+                        const particles = heartParticles.get(currentTalent.id);
+                        
+                        if (!burstAnim) return null;
+                        
+                        const rotation = burstAnim.rotation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', '20deg'],
+                        });
+                        
+                        return (
+                          <>
+                            {/* Main heart burst */}
+                            <Animated.View
+                              style={[
+                                styles.heartBurst,
+                                {
+                                  transform: [
+                                    { scale: burstAnim.scale },
+                                    { rotate: rotation },
+                                  ],
+                                  opacity: burstAnim.opacity,
+                                },
+                              ]}
+                              pointerEvents="none"
+                            >
+                              <Ionicons name="heart" size={120} color="#ef4444" />
+                            </Animated.View>
+                            
+                            {/* Particle hearts */}
+                            {particles && particles.map((particle, index) => {
+                              const particleRotation = particle.rotation.interpolate({
+                                inputRange: [0, 2],
+                                outputRange: ['0deg', '360deg'],
+                              });
+                              
+                              return (
+                                <Animated.View
+                                  key={index}
+                                  style={[
+                                    styles.heartParticle,
+                                    {
+                                      transform: [
+                                        { translateX: particle.translateX },
+                                        { translateY: particle.translateY },
+                                        { scale: particle.scale },
+                                        { rotate: particleRotation },
+                                      ],
+                                      opacity: particle.opacity,
+                                    },
+                                  ]}
+                                  pointerEvents="none"
+                                >
+                                  <Ionicons 
+                                    name="heart" 
+                                    size={24} 
+                                    color={index % 2 === 0 ? "#ef4444" : "#ff6b9d"} 
+                                  />
+                                </Animated.View>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                      
                       {/* User Info at Top */}
-                      <View style={styles.storiesUserInfo}>
+                      <View style={styles.storiesUserInfo} pointerEvents="box-none">
                         <TouchableOpacity
                           style={styles.storiesUserInfoContent}
                           onPress={() => {
@@ -2057,6 +2519,7 @@ export default function TalentsScreen() {
                             }
                           }}
                           activeOpacity={0.8}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
                           <View style={styles.storiesUserAvatar}>
                             {currentTalent.student?.profileImage ? (
@@ -2093,11 +2556,13 @@ export default function TalentsScreen() {
                             onPress={() => handleLikeTalent(currentTalent.id)} 
                             style={styles.storiesActionButton}
                           >
-                            <Ionicons 
-                              name={likedTalents.has(currentTalent.id) ? "heart" : "heart-outline"} 
-                              size={28} 
-                              color={likedTalents.has(currentTalent.id) ? "#ff6b9d" : "white"} 
-                            />
+                            <Animated.View style={{ transform: [{ scale: scaleAnimations.get(currentTalent.id) || new Animated.Value(1) }] }}>
+                              <Ionicons 
+                                name={likedTalents.has(currentTalent.id) ? "heart" : "heart-outline"} 
+                                size={28} 
+                                color={likedTalents.has(currentTalent.id) ? "#ff6b9d" : "white"} 
+                              />
+                            </Animated.View>
                           </Pressable>
                           <Pressable 
                             onPress={() => handleSaveTalent(currentTalent.id)} 
@@ -2565,9 +3030,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   storiesContainer: {
-    height: 100,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    height: 120,
+    paddingHorizontal: 2,
+    paddingVertical: 14,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 0.5,
     borderBottomColor: '#e5e7eb',
@@ -2586,9 +3051,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   storyRing: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     borderWidth: 2.5,
     borderColor: '#8F1A27',
     justifyContent: 'center',
@@ -2602,14 +3067,14 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   storyImage: {
-    width: 51,
-    height: 51,
-    borderRadius: 25.5,
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
   },
   storyVideoContainer: {
-    width: 51,
-    height: 51,
-    borderRadius: 25.5,
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -2635,6 +3100,93 @@ const styles = StyleSheet.create({
   },
   errorAlert: {
     margin: 16,
+  },
+  likesModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  likesModalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: height * 0.8,
+    paddingBottom: 20,
+  },
+  likesModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  likesModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  likesModalCloseButton: {
+    padding: 4,
+  },
+  likesModalLoading: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  likesModalEmpty: {
+    padding: 60,
+    alignItems: 'center',
+  },
+  likesModalEmptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6b7280',
+  },
+  likesModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  likesModalAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    marginRight: 12,
+    backgroundColor: COLORS.maroon,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  likesModalAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  likesModalAvatarFallback: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.maroon,
+  },
+  likesModalAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  likesModalItemInfo: {
+    flex: 1,
+  },
+  likesModalItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  likesModalItemEmail: {
+    fontSize: 14,
+    color: '#6b7280',
   },
   placeholderContainer: {
     height: 180,
@@ -2972,9 +3524,9 @@ const styles = StyleSheet.create({
   },
   storiesCloseButton: {
     position: 'absolute',
-    top: 50,
+    top: 55,
     right: 20,
-    zIndex: 10,
+    zIndex: 30,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -3003,6 +3555,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    alignSelf: 'flex-start',
+    maxWidth: '78%',
   },
   storiesUserAvatar: {
     width: 32,
@@ -3023,7 +3577,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '700',
-    flex: 1,
+    flexShrink: 1,
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,

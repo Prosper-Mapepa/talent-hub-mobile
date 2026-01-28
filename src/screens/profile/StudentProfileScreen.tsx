@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,25 +10,32 @@ import {
   RefreshControl,
   Alert,
   StatusBar,
+  Modal,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, Audio } from 'expo-av';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { useAppSelector, useAppDispatch } from '../../store';
-import { followUser, unfollowUser, checkFollowStatus } from '../../store/slices/followsSlice';
+import { followUser, unfollowUser, checkFollowStatus, fetchFollowers, fetchFollowing } from '../../store/slices/followsSlice';
 import { createConversation, sendMessage } from '../../store/slices/messagesSlice';
 import { showToast } from '../../components/ui/toast';
 import Constants from 'expo-constants';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiService } from '../../services/api';
+import { User, Student } from '../../types';
 import { ActivityIndicator } from 'react-native';
+import ReportBlockModal from '../../components/ReportBlockModal';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 type StudentProfileParams = {
   StudentProfile: {
@@ -108,12 +115,37 @@ export default function StudentProfileScreen() {
   const [activeTab, setActiveTab] = useState<string>('about');
   const scrollViewRef = React.useRef<ScrollView>(null);
   const sectionRefs = React.useRef<{ [key: string]: number }>({});
-  const [playingVideos, setPlayingVideos] = useState<Set<string>>(new Set());
+  const videoRefs = React.useRef<Map<string, any>>(new Map());
+  const [currentPlayingVideoId, setCurrentPlayingVideoId] = useState<string | null>(null);
+  
+  // Reel viewer state
+  const [reelModalVisible, setReelModalVisible] = useState(false);
+  const [selectedReelTalent, setSelectedReelTalent] = useState<any>(null);
+  const [selectedReelIndex, setSelectedReelIndex] = useState(0);
+  const reelFlatListRef = useRef<FlatList>(null);
+  const reelVideoRefs = useRef<Map<number, any>>(new Map());
+  
+  // Followers/Following/Who Liked state
+  const [showFollowersModal, setShowFollowersModal] = useState(false);
+  const [showFollowingModal, setShowFollowingModal] = useState(false);
+  const [showWhoLikedModal, setShowWhoLikedModal] = useState(false);
+  const [followers, setFollowers] = useState<User[]>([]);
+  const [following, setFollowing] = useState<User[]>([]);
+  const [whoLiked, setWhoLiked] = useState<Student[]>([]);
+  const [showReportBlockModal, setShowReportBlockModal] = useState(false);
+  const [isLoadingFollowers, setIsLoadingFollowers] = useState(false);
+  const [isLoadingFollowing, setIsLoadingFollowing] = useState(false);
+  const [isLoadingWhoLiked, setIsLoadingWhoLiked] = useState(false);
   
   // Check if file is a video
   const isVideoFile = (filePath: string) => {
     const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi'];
     return videoExtensions.some(ext => filePath.toLowerCase().includes(ext));
+  };
+
+  const isImageFile = (filePath: string) => {
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'];
+    return imageExtensions.some(ext => filePath.toLowerCase().includes(ext));
   };
 
   // Fetch student data if only studentId is provided
@@ -134,15 +166,21 @@ export default function StudentProfileScreen() {
           // Fetch student by ID using axios directly
           const getApiBaseUrl = () => {
             const envApiUrl = Constants.expoConfig?.extra?.apiBaseUrl;
+            // If environment URL is set, use it (prioritizes configured URL)
+            if (envApiUrl) {
+              return envApiUrl;
+            }
+            // Check if we're in development mode
             if (__DEV__) {
               const platform = require('react-native').Platform.OS;
               if (platform === 'android') {
-                return 'http://10.0.2.2:3001';
+                return 'http://10.0.2.2:3001'; // Android emulator
               } else if (platform === 'ios') {
-                return 'http://localhost:3001';
+                return 'http://localhost:3001'; // iOS simulator
               }
             }
-            return envApiUrl || 'http://192.168.0.106:3001';
+            // Production fallback
+            return 'https://web-production-11221.up.railway.app';
           };
           
           const token = await AsyncStorage.getItem('authToken');
@@ -198,6 +236,32 @@ export default function StudentProfileScreen() {
         }
       }, [student, user?.id, isOwnProfile, dispatch]);
 
+  // Function to refresh follower/following/who liked counts
+  const refreshFollowerCounts = React.useCallback(async (userId: string, studentId: string) => {
+    try {
+      const followersResult = await dispatch(fetchFollowers(userId)).unwrap();
+      setFollowers(followersResult.followers || []);
+      const followingResult = await dispatch(fetchFollowing(userId)).unwrap();
+      setFollowing(followingResult.following || []);
+      // Automatically fetch who liked
+      const students = await apiService.getWhoLikedTalents(studentId);
+      setWhoLiked(students || []);
+    } catch (error) {
+      console.error('Error refreshing social stats:', error);
+    }
+  }, [dispatch]);
+
+  // Load follower/following/who liked counts when student is loaded
+  useEffect(() => {
+    if (student) {
+      const userId = student.userId || student.user?.id;
+      const studentId = student.id;
+      if (userId && studentId) {
+        refreshFollowerCounts(userId, studentId);
+      }
+    }
+  }, [student, refreshFollowerCounts]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     // Add refresh logic here if needed
@@ -247,6 +311,8 @@ export default function StudentProfileScreen() {
         })).unwrap();
         setIsFollowing(false);
         showToast(`Unfollowed ${student.firstName} ${student.lastName}`, 'info');
+        // Refresh follower/following/who liked counts after unfollow
+        await refreshFollowerCounts(followingId, student.id);
       } else {
         await dispatch(followUser({ 
           followerId: user.id, 
@@ -254,6 +320,8 @@ export default function StudentProfileScreen() {
         })).unwrap();
         setIsFollowing(true);
         showToast(`Following ${student.firstName} ${student.lastName}`, 'success');
+        // Refresh follower/following/who liked counts after follow
+        await refreshFollowerCounts(followingId, student.id);
       }
     } catch (error: any) {
       console.error('Error toggling follow:', error);
@@ -275,12 +343,104 @@ export default function StudentProfileScreen() {
       );
   };
 
+  const handleShowFollowers = async () => {
+    if (!student) return;
+    const userId = student.userId || student.user?.id;
+    if (!userId) {
+      showToast('Unable to find user information', 'error');
+      return;
+    }
+    setIsLoadingFollowers(true);
+    setShowFollowersModal(true);
+    try {
+      const result = await dispatch(fetchFollowers(userId)).unwrap();
+      setFollowers(result.followers || []);
+    } catch (error: any) {
+      console.error('Error fetching followers:', error);
+      showToast('Failed to load followers', 'error');
+      setShowFollowersModal(false);
+    } finally {
+      setIsLoadingFollowers(false);
+    }
+  };
+
+  const handleShowFollowing = async () => {
+    if (!student) return;
+    const userId = student.userId || student.user?.id;
+    if (!userId) {
+      showToast('Unable to find user information', 'error');
+      return;
+    }
+    setIsLoadingFollowing(true);
+    setShowFollowingModal(true);
+    try {
+      const result = await dispatch(fetchFollowing(userId)).unwrap();
+      setFollowing(result.following || []);
+    } catch (error: any) {
+      console.error('Error fetching following:', error);
+      showToast('Failed to load following list', 'error');
+      setShowFollowingModal(false);
+    } finally {
+      setIsLoadingFollowing(false);
+    }
+  };
+
+  const handleShowWhoLiked = async () => {
+    if (!student?.id) return;
+    setIsLoadingWhoLiked(true);
+    setShowWhoLikedModal(true);
+    try {
+      const students = await apiService.getWhoLikedTalents(student.id);
+      setWhoLiked(students || []);
+    } catch (error: any) {
+      console.error('Error fetching who liked:', error);
+      showToast('Failed to load who liked content', 'error');
+    } finally {
+      setIsLoadingWhoLiked(false);
+    }
+  };
+
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
     if (filePath.startsWith('http')) return filePath;
     
-    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'http://192.168.0.106:3001';
+    const baseUrl = Constants.expoConfig?.extra?.apiBaseUrl || 'https://web-production-11221.up.railway.app';
     return `${baseUrl}${filePath}`;
+  };
+
+  const openReelViewer = async (talent: any, fileIndex: number = 0) => {
+    // Configure audio to play through device speakers
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error('Error setting audio mode:', error);
+    }
+    
+    // Clear previous video refs
+    reelVideoRefs.current.clear();
+    
+    setSelectedReelTalent(talent);
+    setSelectedReelIndex(fileIndex);
+    setReelModalVisible(true);
+    
+    // Auto-play the first video if it's a video file
+    setTimeout(async () => {
+      if (talent.files && talent.files.length > 0 && isVideoFile(talent.files[fileIndex])) {
+        const videoRef = reelVideoRefs.current.get(fileIndex);
+        if (videoRef) {
+          try {
+            await videoRef.playAsync();
+          } catch (error) {
+            console.error('Error auto-playing video:', error);
+          }
+        }
+      }
+    }, 300);
   };
 
   const getProficiencyColor = (level: string) => {
@@ -402,54 +562,88 @@ export default function StudentProfileScreen() {
     </Card>
   );
 
+  // Get files in reverse order (newest first) - when talent is updated, new files are appended
+  // So reversing gives us newest files first, followed by older files
+  const getFilesNewestFirst = (files: string[] | undefined | null): string[] => {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return [];
+    }
+    // Reverse to show newest files first (new files are appended to the end)
+    return [...files].reverse();
+  };
+
   const renderTalent = (talent: any) => {
-    const firstFile = talent.files && talent.files.length > 0 ? talent.files[0] : null;
-    const isVideo = firstFile ? isVideoFile(firstFile) : false;
-    
+    const talentFiles = getFilesNewestFirst(talent.files);
     return (
     <Card key={talent.id} style={styles.talentCard}>
       <CardContent style={styles.talentContent}>
-          {firstFile && (
-            <>
-              {isVideo ? (
-                <View style={styles.videoContainer}>
-                  <Video
-                    source={{ uri: getFileUrl(firstFile) }}
-                    style={styles.talentImage}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={true}
-                    isMuted={true}
-                    useNativeControls={false}
-                    isLooping={true}
-                    onPlaybackStatusUpdate={(status) => {
-                      if (status.isLoaded) {
-                        if (status.isPlaying) {
-                          setPlayingVideos(prev => new Set(prev).add(talent.id));
-                        } else {
-                          setPlayingVideos(prev => {
-                            const newSet = new Set(prev);
-                            newSet.delete(talent.id);
-                            return newSet;
-                          });
-                        }
-                      }
+          {talentFiles.length > 0 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              style={styles.talentFilesContainer}
+              contentContainerStyle={styles.talentFilesContent}
+            >
+              {talentFiles.map((file: string, index: number) => {
+                const isVideo = isVideoFile(file);
+                const isImage = isImageFile(file);
+                const fileKey = `${talent.id}-${index}`;
+                const isCurrentlyPlaying = currentPlayingVideoId === fileKey;
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.talentFileItem}
+                    activeOpacity={0.95}
+                    onPress={() => {
+                      openReelViewer(talent, index);
                     }}
-                  />
-                  {!playingVideos.has(talent.id) && (
-                    <View style={styles.videoOverlay}>
-                      <Ionicons name="play-circle" size={40} color="white" />
-                    </View>
-                  )}
-                </View>
-              ) : (
-          <Image
-                  source={{ uri: getFileUrl(firstFile) }}
-            style={styles.talentImage}
-            resizeMode="cover"
-          />
-              )}
-            </>
-        )}
+                  >
+                    {isVideo ? (
+                      <View style={styles.videoContainer}>
+                        <Video
+                          ref={(ref) => {
+                            if (ref) {
+                              videoRefs.current.set(fileKey, ref);
+                            } else {
+                              videoRefs.current.delete(fileKey);
+                            }
+                          }}
+                          source={{ uri: getFileUrl(file) }}
+                          style={styles.talentFileImage}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay={isCurrentlyPlaying}
+                          isMuted={!isCurrentlyPlaying}
+                          useNativeControls={false}
+                          isLooping={true}
+                        />
+                        {!isCurrentlyPlaying && (
+                          <View style={styles.videoOverlay}>
+                            <Ionicons name="play-circle" size={40} color="white" />
+                          </View>
+                        )}
+                      </View>
+                    ) : isImage ? (
+                      <Image
+                        source={{ uri: getFileUrl(file) }}
+                        style={styles.talentFileImage}
+                        resizeMode="cover"
+                        onError={(error) => {
+                          console.error('Image loading error:', error);
+                          console.error('File path:', file);
+                          console.error('Image URL:', getFileUrl(file));
+                        }}
+                      />
+                    ) : (
+                      <View style={styles.talentFilePlaceholder}>
+                        <Ionicons name="document" size={24} color="#9ca3af" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
         <View style={styles.talentText}>
           <View style={styles.talentHeader}>
             <Text style={styles.talentTitle}>{talent.title}</Text>
@@ -513,7 +707,7 @@ export default function StudentProfileScreen() {
           
           <View style={styles.headerContent}>
             <Text style={styles.headerSubtitle}>
-              {student?.firstName || ''} {student?.lastName || ''}
+              {/* {student?.firstName || ''} {student?.lastName || ''} */}
             </Text>
           </View>
 
@@ -540,6 +734,12 @@ export default function StudentProfileScreen() {
                     </TouchableOpacity>
               <TouchableOpacity style={styles.contactButton} onPress={handleContact}>
                 <Ionicons name="mail" size={20} color="white" />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.moreButton} 
+                onPress={() => setShowReportBlockModal(true)}
+              >
+                <Ionicons name="ellipsis-vertical" size={20} color="white" />
               </TouchableOpacity>
                   </View>
             )}
@@ -643,7 +843,7 @@ export default function StudentProfileScreen() {
         >
           <Card style={styles.profileCard}>
             <CardContent style={styles.profileContent}>
-              <View style={styles.profileImageContainer}>
+              {/* <View style={styles.profileImageContainer}>
                 {student.profileImage ? (
                   <Image
                     source={{ uri: getFileUrl(student.profileImage) }}
@@ -655,7 +855,7 @@ export default function StudentProfileScreen() {
                     <Ionicons name="person" size={48} color="#8F1A27" />
                   </View>
                 )}
-              </View>
+              </View> */}
               
                              <View style={styles.profileInfo}>
                  <Text style={styles.studentName}>
@@ -692,23 +892,39 @@ export default function StudentProfileScreen() {
                 </View>
                  
                 <View style={styles.profileMetaRow}>
-                 {student.availability && (
+                 {student.availability ? (
                     <View style={styles.availabilityRow}>
                       <Ionicons name="time" size={16} color="#6b7280" />
                       <Text style={styles.availabilityText}>
                         {student.availability.replace(/_/g, ' ')}
                       </Text>
-                   </View>
-                 )}
+                    </View>
+                 ) : null}
                  
-                 {student.profileViews && (
+                 {student.profileViews ? (
                     <View style={styles.viewsRow}>
-                     <Ionicons name="eye" size={16} color="#8F1A27" />
+                      <Ionicons name="eye" size={16} color="#8F1A27" />
                       <Text style={styles.viewsText}>
                         {student.profileViews} {student.profileViews === 1 ? 'view' : 'views'}
                       </Text>
-                   </View>
-                 )}
+                    </View>
+                 ) : null}
+                 
+                 {/* Followers/Following/Who Liked */}
+                 <View style={styles.socialStatsRow}>
+                   <TouchableOpacity style={styles.socialStatButton} onPress={handleShowFollowers}>
+                     <Text style={styles.socialStatNumber}>{followers.length}</Text>
+                     <Text style={styles.socialStatLabel}>Followers</Text>
+                   </TouchableOpacity>
+                   <TouchableOpacity style={styles.socialStatButton} onPress={handleShowFollowing}>
+                     <Text style={styles.socialStatNumber}>{following.length}</Text>
+                     <Text style={styles.socialStatLabel}>Following</Text>
+                   </TouchableOpacity>
+                   <TouchableOpacity style={styles.socialStatButton} onPress={handleShowWhoLiked}>
+                     <Text style={styles.socialStatNumber}>{whoLiked.length}</Text>
+                     <Text style={styles.socialStatLabel}>Liked</Text>
+                   </TouchableOpacity>
+                 </View>
                 </View>
                </View>
             </CardContent>
@@ -836,7 +1052,11 @@ export default function StudentProfileScreen() {
 
       {/* Message Modal */}
       {showMessageModal && student && (
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}
+        >
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Send Direct Message</Text>
@@ -964,20 +1184,39 @@ export default function StudentProfileScreen() {
                     setShowMessageModal(false);
                   } catch (error: any) {
                     console.error('Failed to send message:', error);
+                    console.error('Error type:', typeof error);
+                    console.error('Error structure:', JSON.stringify(error, null, 2));
+                    
+                    // Extract error message with priority: string from rejectWithValue > API response message > error.message > status-based fallback
                     let errorMessage = 'Failed to send message.';
-                    if (error.message) {
+                    
+                    // When .unwrap() throws from a rejected thunk, it throws the value from rejectWithValue (which is a string)
+                    if (typeof error === 'string') {
+                      errorMessage = error;
+                    }
+                    // Handle Axios error objects (from direct API calls, not thunks)
+                    else if (error.response?.data?.message) {
+                      errorMessage = error.response.data.message;
+                    } else if (error.message && !error.message.includes('Request failed with status code')) {
+                      // Use error.message only if it's not a generic Axios error message
                       errorMessage = error.message;
                     } else if (error.response?.status === 401) {
                       errorMessage = 'You are not authenticated. Please log out and log back in.';
                     } else if (error.response?.status === 403) {
-                      errorMessage = 'You are not authorized to send messages.';
+                      // For 403, check if there's a more specific message in the response
+                      errorMessage = error.response?.data?.message || 'You are not authorized to send messages.';
                     } else if (error.response?.status === 404) {
                       errorMessage = 'Recipient not found.';
                     } else if (error.response?.status === 400) {
-                      errorMessage = 'Invalid request. Please check your message.';
+                      errorMessage = error.response?.data?.message || 'Invalid request. Please check your message.';
                     }
+                    
+                    console.log('Final error message to display:', errorMessage);
+                    
+                    // Show error toast and keep modal closed to avoid overlapping modals
                     showToast(errorMessage, 'error');
-                    setShowMessageModal(true); // Re-open modal on error
+                    // Don't re-open modal immediately - let user see the error first
+                    // User can manually open the modal again if they want to retry
                   } finally {
                     setIsSendingMessage(false);
                   }
@@ -993,8 +1232,376 @@ export default function StudentProfileScreen() {
               </Button>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       )}
+
+      {/* Followers Modal */}
+      {showFollowersModal && (
+        <Modal
+          visible={showFollowersModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowFollowersModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Followers</Text>
+                <TouchableOpacity
+                  onPress={() => setShowFollowersModal(false)}
+                  style={styles.closeButton}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              {isLoadingFollowers ? (
+                <View style={styles.modalLoadingContainer}>
+                  <ActivityIndicator size="large" color="#8F1A27" />
+                </View>
+              ) : followers.length === 0 ? (
+                <View style={styles.modalEmptyContainer}>
+                  <Ionicons name="people-outline" size={48} color="#d1d5db" />
+                  <Text style={styles.modalEmptyText}>No followers yet</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={followers}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowFollowersModal(false);
+                        if (item.studentId) {
+                          navigation.navigate('StudentProfile', { studentId: item.studentId });
+                        }
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.email || 'Unknown User'}
+                        </Text>
+                        <Text style={styles.modalListEmail}>{item.email}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Following Modal */}
+      {showFollowingModal && (
+        <Modal
+          visible={showFollowingModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowFollowingModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Following</Text>
+                <TouchableOpacity
+                  onPress={() => setShowFollowingModal(false)}
+                  style={styles.closeButton}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              {isLoadingFollowing ? (
+                <View style={styles.modalLoadingContainer}>
+                  <ActivityIndicator size="large" color="#8F1A27" />
+                </View>
+              ) : following.length === 0 ? (
+                <View style={styles.modalEmptyContainer}>
+                  <Ionicons name="people-outline" size={48} color="#d1d5db" />
+                  <Text style={styles.modalEmptyText}>Not following anyone yet</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={following}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowFollowingModal(false);
+                        if (item.studentId) {
+                          navigation.navigate('StudentProfile', { studentId: item.studentId });
+                        }
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.email || 'Unknown User'}
+                        </Text>
+                        <Text style={styles.modalListEmail}>{item.email}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Reel Viewer Modal */}
+      <Modal
+        visible={reelModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setReelModalVisible(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.reelContainer}>
+          <StatusBar hidden={true} />
+          
+          {/* Close Button */}
+          <TouchableOpacity
+            style={styles.reelCloseButton}
+            onPress={() => setReelModalVisible(false)}
+          >
+            <Ionicons name="close" size={28} color="white" />
+          </TouchableOpacity>
+
+          {/* Reel FlatList */}
+          {selectedReelTalent && selectedReelTalent.files && selectedReelTalent.files.length > 0 && (
+            <FlatList
+              ref={reelFlatListRef}
+              data={selectedReelTalent.files}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              keyExtractor={(item, index) => `reel-${index}`}
+              initialScrollIndex={selectedReelIndex}
+              getItemLayout={(_, index) => ({
+                length: height,
+                offset: height * index,
+                index,
+              })}
+              onMomentumScrollEnd={async (event) => {
+                const index = Math.round(event.nativeEvent.contentOffset.y / height);
+                
+                // Pause previous video
+                if (selectedReelIndex !== index) {
+                  const prevVideoRef = reelVideoRefs.current.get(selectedReelIndex);
+                  if (prevVideoRef) {
+                    try {
+                      await prevVideoRef.pauseAsync();
+                    } catch (error) {
+                      console.error('Error pausing previous video:', error);
+                    }
+                  }
+                }
+                
+                // Play new video
+                const newVideoRef = reelVideoRefs.current.get(index);
+                if (newVideoRef && selectedReelTalent?.files && isVideoFile(selectedReelTalent.files[index])) {
+                  try {
+                    await newVideoRef.playAsync();
+                  } catch (error) {
+                    console.error('Error playing new video:', error);
+                  }
+                }
+                
+                setSelectedReelIndex(index);
+              }}
+              renderItem={({ item, index }) => {
+                const isVideo = isVideoFile(item);
+                const isImage = isImageFile(item);
+                const studentName = student ? `${student.firstName} ${student.lastName}` : 'Unknown Student';
+                const isCurrentlyPlaying = selectedReelIndex === index;
+                
+                return (
+                  <View style={styles.reelItem}>
+                    {isVideo ? (
+                      <Video
+                        ref={(ref) => {
+                          if (ref) {
+                            reelVideoRefs.current.set(index, ref);
+                          } else {
+                            reelVideoRefs.current.delete(index);
+                          }
+                        }}
+                        source={{ uri: getFileUrl(item) }}
+                        style={styles.reelMedia}
+                        useNativeControls={false}
+                        resizeMode={ResizeMode.COVER}
+                        shouldPlay={isCurrentlyPlaying}
+                        isMuted={!isCurrentlyPlaying}
+                        isLooping={true}
+                      />
+                    ) : isImage ? (
+                      <Image
+                        source={{ uri: getFileUrl(item) }}
+                        style={styles.reelMedia}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <View style={styles.reelMedia}>
+                        <Ionicons name="document" size={48} color="white" />
+                      </View>
+                    )}
+                    
+                    {/* Content Overlay */}
+                    <View style={styles.reelOverlay}>
+                      {/* Top Info */}
+                      <View style={styles.reelTopInfo}>
+                        <TouchableOpacity
+                          style={styles.reelProfileInfo}
+                          onPress={() => setReelModalVisible(false)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.reelProfileImage}>
+                            {student?.profileImage ? (
+                              <Image
+                                source={{ uri: getFileUrl(student.profileImage) }}
+                                style={styles.reelProfileImg}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <Ionicons name="person" size={20} color="white" />
+                            )}
+                          </View>
+                          <Text style={styles.reelProfileName}>
+                            {studentName}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Bottom Info */}
+                      <View style={styles.reelBottomInfo}>
+                        <Text style={styles.reelTitle}>{selectedReelTalent.title}</Text>
+                        <Text style={styles.reelDescription} numberOfLines={3}>
+                          {selectedReelTalent.description}
+                        </Text>
+                        {selectedReelTalent.category && (
+                          <View style={styles.reelCategoryBadge}>
+                            <Text style={styles.reelCategoryText}>{selectedReelTalent.category}</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Media Indicator */}
+                      {selectedReelTalent.files.length > 1 && (
+                        <View style={styles.reelIndicator}>
+                          {selectedReelTalent.files.map((_: unknown, idx: number) => (
+                            <View
+                              key={idx}
+                              style={[
+                                styles.reelDot,
+                                index === idx && styles.reelDotActive
+                              ]}
+                            />
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              }}
+            />
+          )}
+        </View>
+      </Modal>
+
+      {/* Who Liked Modal */}
+      {showWhoLikedModal && (
+        <Modal
+          visible={showWhoLikedModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowWhoLikedModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Who Liked Content</Text>
+                <TouchableOpacity
+                  onPress={() => setShowWhoLikedModal(false)}
+                  style={styles.closeButton}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              {isLoadingWhoLiked ? (
+                <View style={styles.modalLoadingContainer}>
+                  <ActivityIndicator size="large" color="#8F1A27" />
+                </View>
+              ) : whoLiked.length === 0 ? (
+                <View style={styles.modalEmptyContainer}>
+                  <Ionicons name="heart-outline" size={48} color="#d1d5db" />
+                  <Text style={styles.modalEmptyText}>No one has liked content yet</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={whoLiked}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.modalListItem}
+                      onPress={() => {
+                        setShowWhoLikedModal(false);
+                        navigation.navigate('StudentProfile', { studentId: item.id });
+                      }}
+                    >
+                      <View style={styles.modalListAvatar}>
+                        <Text style={styles.modalListAvatarText}>
+                          {item.firstName?.[0]?.toUpperCase() || item.user?.firstName?.[0]?.toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                      <View style={styles.modalListInfo}>
+                        <Text style={styles.modalListName}>
+                          {item.firstName && item.lastName
+                            ? `${item.firstName} ${item.lastName}`
+                            : item.user?.email || 'Unknown User'}
+                        </Text>
+                        {item.user?.email && (
+                          <Text style={styles.modalListEmail}>{item.user.email}</Text>
+                        )}
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+      <ReportBlockModal
+        visible={showReportBlockModal}
+        onClose={() => setShowReportBlockModal(false)}
+        userId={student?.user?.id}
+        userName={student ? `${student.firstName} ${student.lastName}` : undefined}
+        contentType="PROFILE"
+        onBlockSuccess={() => {
+          // Refresh the profile or navigate back
+          navigation.goBack();
+        }}
+        onReportSuccess={() => {
+          setShowReportBlockModal(false);
+        }}
+      />
     </View>
   );
 }
@@ -1011,7 +1618,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 10,
   },
   backButton: {
     padding: 8,
@@ -1066,11 +1673,16 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
   },
+  moreButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    padding: 10,
+    borderRadius: 8,
+  },
   tabsContainer: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   tabsScrollContent: {
     paddingHorizontal: 16,
@@ -1513,6 +2125,31 @@ const styles = StyleSheet.create({
     color: '#4b5563',
     lineHeight: 22,
   },
+  talentFilesContainer: {
+    marginBottom: 0,
+  },
+  talentFilesContent: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 0,
+  },
+  talentFileItem: {
+    marginRight: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  talentFileImage: {
+    width: 200,
+    height: 200,
+    backgroundColor: '#f3f4f6',
+  },
+  talentFilePlaceholder: {
+    width: 200,
+    height: 200,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   contactSection: {
     padding: 16,
     paddingTop: 8,
@@ -1626,6 +2263,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     width: width - 40,
     maxWidth: 500,
+    maxHeight: height * 0.8,
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -1675,5 +2313,215 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 4,
+  },
+  socialStatsRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+  },
+  socialStatButton: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  socialStatNumber: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#8F1A27',
+    marginBottom: 2,
+  },
+  socialStatLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  modalLoadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  modalListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: '#f9fafb',
+    borderRadius: 10,
+  },
+  modalListAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#8F1A27',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  modalListAvatarText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalListInfo: {
+    flex: 1,
+  },
+  modalListName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  modalListEmail: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  // Reel Viewer Styles
+  reelContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  reelCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reelItem: {
+    width: width,
+    height: height,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reelMedia: {
+    width: width,
+    height: height,
+    backgroundColor: '#000',
+    maxWidth: width,
+    maxHeight: height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reelOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+  },
+  reelTopInfo: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    zIndex: 5,
+  },
+  reelProfileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  reelProfileImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+    overflow: 'hidden',
+  },
+  reelProfileImg: {
+    width: '100%',
+    height: '100%',
+  },
+  reelProfileName: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  reelBottomInfo: {
+    position: 'absolute',
+    bottom: 100,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    zIndex: 5,
+  },
+  reelTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  reelDescription: {
+    color: 'white',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  reelCategoryBadge: {
+    backgroundColor: '#FEBF17',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  reelCategoryText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  reelIndicator: {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 5,
+    transform: [{ translateY: -50 }],
+  },
+  reelDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  reelDotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
   },
 });

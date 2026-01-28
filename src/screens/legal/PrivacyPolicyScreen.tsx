@@ -122,114 +122,84 @@ const PrivacyPolicyScreen: React.FC = () => {
                 }
               ]}
             >
-              <Text style={styles.lastUpdated}>Last Updated: December 2024</Text>
+              <Text style={styles.lastUpdated}>Last Updated: January 14, 2026</Text>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>1. Information We Collect</Text>
+                <Text style={styles.sectionTitle}>1. Introduction</Text>
                 <Text style={styles.sectionText}>
-                  We collect information you provide directly to us, such as when you create an account, 
-                  complete your profile, apply for jobs, or contact us. This may include:
+                  CMUTalentHub is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our platform and mobile application.
                 </Text>
-                <Text style={styles.bulletPoint}>• Personal information (name, email, phone number)</Text>
-                <Text style={styles.bulletPoint}>• Academic information (major, graduation year, GPA)</Text>
-                <Text style={styles.bulletPoint}>• Professional information (skills, projects, achievements)</Text>
-                <Text style={styles.bulletPoint}>• Business information (company details, job postings)</Text>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>2. How We Use Your Information</Text>
+                <Text style={styles.sectionTitle}>2. Information We Collect</Text>
+                <Text style={styles.sectionText}>
+                  We collect information that you provide directly to us, including:
+                </Text>
+                <Text style={styles.bulletPoint}>• Personal information (name, email address)</Text>
+                <Text style={styles.bulletPoint}>• Academic information (university affiliation, major, graduation year)</Text>
+                <Text style={styles.bulletPoint}>• Profile information (skills, projects, work experience, portfolio content)</Text>
+                <Text style={styles.bulletPoint}>• Business information (company details, job postings, contact information)</Text>
+                <Text style={styles.bulletPoint}>• Account credentials and authentication data</Text>
+                <Text style={styles.bulletPoint}>• Messages and communications sent through our platform</Text>
+                <Text style={styles.bulletPoint}>• Application and job-related information</Text>
+              </View>
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>3. How We Use Your Information</Text>
                 <Text style={styles.sectionText}>
                   We use the information we collect to:
                 </Text>
-                <Text style={styles.bulletPoint}>• Provide and maintain our services</Text>
-                <Text style={styles.bulletPoint}>• Connect students with job opportunities</Text>
-                <Text style={styles.bulletPoint}>• Enable businesses to find talented students</Text>
-                <Text style={styles.bulletPoint}>• Send you important updates and notifications</Text>
-                <Text style={styles.bulletPoint}>• Improve our platform and user experience</Text>
+                <Text style={styles.bulletPoint}>• Provide, maintain, and improve our services</Text>
+                <Text style={styles.bulletPoint}>• Connect students with job opportunities and businesses</Text>
+                <Text style={styles.bulletPoint}>• Enable communication between users</Text>
+                <Text style={styles.bulletPoint}>• Verify user identities and ensure platform security</Text>
+                <Text style={styles.bulletPoint}>• Send you important updates, notifications, and administrative messages</Text>
+                <Text style={styles.bulletPoint}>• Personalize your experience and provide relevant content</Text>
+                <Text style={styles.bulletPoint}>• Monitor and analyze usage patterns to improve our platform</Text>
+                <Text style={styles.bulletPoint}>• Comply with legal obligations and enforce our terms of service</Text>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>3. Information Sharing</Text>
+                <Text style={styles.sectionTitle}>4. Information Sharing and Disclosure</Text>
                 <Text style={styles.sectionText}>
-                  We do not sell, trade, or rent your personal information to third parties. 
                   We may share your information in the following circumstances:
                 </Text>
-                <Text style={styles.bulletPoint}>• With your consent</Text>
-                <Text style={styles.bulletPoint}>• To comply with legal obligations</Text>
-                <Text style={styles.bulletPoint}>• To protect our rights and safety</Text>
-                <Text style={styles.bulletPoint}>• With service providers who assist in our operations</Text>
+                <Text style={styles.bulletPoint}>• With other users: Your profile information is visible to other users on the platform as intended by your privacy settings</Text>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>4. Data Security</Text>
+                <Text style={styles.sectionTitle}>5. Data Security</Text>
                 <Text style={styles.sectionText}>
-                  We implement appropriate security measures to protect your personal information 
-                  against unauthorized access, alteration, disclosure, or destruction. These measures include:
+                  We implement appropriate technical and organizational security measures to protect your personal information. However, no method of transmission over the internet or electronic storage is 100% secure, and we cannot guarantee absolute security.
                 </Text>
-                <Text style={styles.bulletPoint}>• Encryption of data in transit and at rest</Text>
-                <Text style={styles.bulletPoint}>• Regular security assessments</Text>
-                <Text style={styles.bulletPoint}>• Access controls and authentication</Text>
-                <Text style={styles.bulletPoint}>• Secure data storage practices</Text>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>5. Your Rights</Text>
+                <Text style={styles.sectionTitle}>6. Your Rights and Choices</Text>
                 <Text style={styles.sectionText}>
                   You have the right to:
                 </Text>
-                <Text style={styles.bulletPoint}>• Access your personal information</Text>
-                <Text style={styles.bulletPoint}>• Update or correct your information</Text>
-                <Text style={styles.bulletPoint}>• Delete your account and data</Text>
-                <Text style={styles.bulletPoint}>• Opt out of certain communications</Text>
-                <Text style={styles.bulletPoint}>• Request data portability</Text>
+                <Text style={styles.bulletPoint}>• Access and review your personal information</Text>
+                <Text style={styles.bulletPoint}>• Update or correct your information through your account settings</Text>
+                <Text style={styles.bulletPoint}>• Delete your account and associated data</Text>
+                <Text style={styles.bulletPoint}>• Opt-out of certain communications and data processing</Text>
+                <Text style={styles.bulletPoint}>• Request a copy of your data</Text>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>6. Cookies and Tracking</Text>
+                <Text style={styles.sectionTitle}>9. Changes to This Privacy Policy</Text>
                 <Text style={styles.sectionText}>
-                  We use cookies and similar technologies to enhance your experience, 
-                  analyze usage patterns, and improve our services. You can control 
-                  cookie settings through your browser preferences.
-                </Text>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>7. Third-Party Services</Text>
-                <Text style={styles.sectionText}>
-                  Our platform may integrate with third-party services for functionality 
-                  such as file storage, analytics, and payment processing. These services 
-                  have their own privacy policies, and we encourage you to review them.
-                </Text>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>8. Children's Privacy</Text>
-                <Text style={styles.sectionText}>
-                  Our services are not intended for children under 13 years of age. 
-                  We do not knowingly collect personal information from children under 13. 
-                  If you believe we have collected such information, please contact us.
-                </Text>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>9. Changes to This Policy</Text>
-                <Text style={styles.sectionText}>
-                  We may update this Privacy Policy from time to time. We will notify 
-                  you of any material changes by posting the new policy on our platform 
-                  and updating the "Last Updated" date.
+                  We may update this Privacy Policy from time to time. We will notify you of any material changes by posting the new policy on this page and updating the "Last Updated" date. Your continued use of our services after such changes constitutes acceptance of the updated policy.
                 </Text>
               </View>
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>10. Contact Us</Text>
                 <Text style={styles.sectionText}>
-                  If you have any questions about this Privacy Policy or our data practices, 
-                  please contact us at:
+                  If you have any questions, concerns, or requests regarding this Privacy Policy or our data practices, please contact us at:
                 </Text>
-                <Text style={styles.contactInfo}>Email: privacy@cmutalenthub.com</Text>
-                <Text style={styles.contactInfo}>Phone: (412) 268-2000</Text>
-                <Text style={styles.contactInfo}>Address: Carnegie Mellon University</Text>
-                <Text style={styles.contactInfo}>5000 Forbes Avenue, Pittsburgh, PA 15213</Text>
+                <Text style={styles.contactInfo}>Email: mapepapro@gmail.com</Text>
               </View>
             </Animated.View>
           </ScrollView>
@@ -336,11 +306,14 @@ const styles = StyleSheet.create({
     marginLeft: 16,
     marginBottom: 4,
   },
+  boldText: {
+    fontWeight: 'bold',
+  },
   contactInfo: {
     fontSize: 14,
-    color: '#8F1A27',
-    fontWeight: '600',
+    color: '#333',
     marginBottom: 4,
+    marginTop: 4,
   },
   backgroundElements: {
     position: 'absolute',

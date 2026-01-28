@@ -505,18 +505,31 @@ const BusinessDashboardScreen: React.FC = () => {
       setShowMessageModal(false);
     } catch (error: any) {
       console.error('Failed to send message:', error);
+      
+      // Extract error message with priority: API response message > error message (string or object) > status-based fallback
       let errorMessage = 'Failed to send message.';
-      if (error.message) {
+      
+      // Handle string errors (from thunk rejectWithValue)
+      if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      // Handle Axios error objects
+      else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message && !error.message.includes('Request failed with status code')) {
+        // Use error.message only if it's not a generic Axios error message
         errorMessage = error.message;
       } else if (error.response?.status === 401) {
         errorMessage = 'You are not authenticated. Please log out and log back in.';
       } else if (error.response?.status === 403) {
-        errorMessage = 'You are not authorized to send messages.';
+        // For 403, check if there's a more specific message in the response
+        errorMessage = error.response?.data?.message || 'You are not authorized to send messages.';
       } else if (error.response?.status === 404) {
         errorMessage = 'Recipient not found.';
       } else if (error.response?.status === 400) {
-        errorMessage = 'Invalid request. Please check your message.';
+        errorMessage = error.response?.data?.message || 'Invalid request. Please check your message.';
       }
+      
       showToast(errorMessage, 'error');
     } finally {
       setIsSendingMessage(false);

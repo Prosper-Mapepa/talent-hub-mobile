@@ -17,34 +17,85 @@ import {
   SafeAreaView,
 } from 'react-native';
 import FuturisticLogo from '../../components/FuturisticLogo';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../types';
 import { useDispatch } from 'react-redux';
 import { AppDispatch, useAppSelector } from '../../store';
-import { login } from '../../store/slices/authSlice';
+import { login, clearError } from '../../store/slices/authSlice';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 
 const { width, height } = Dimensions.get('window');
+const isTablet = width >= 768 || (Platform.OS === 'ios' && Platform.isPad);
+const isLargeTablet = width >= 1024;
 
 const LoginScreen: React.FC = () => {
-  const [email, setEmail] = useState('mapepa@mail.com');
-  const [password, setPassword] = useState('Pa$$w0rd!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [isFormValid, setIsFormValid] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [hasStoredCredentials, setHasStoredCredentials] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
   const slideAnim = useState(new Animated.Value(20))[0];
   const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'Login'>>();
   const dispatch = useDispatch<AppDispatch>();
   const { isLoading, error } = useAppSelector(state => state.auth);
 
+  // Check biometric availability and stored credentials
+  useEffect(() => {
+    const checkBiometricAvailability = async () => {
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        const storedEmail = await SecureStore.getItemAsync('userEmail');
+        const storedPassword = await SecureStore.getItemAsync('userPassword');
+        
+        setBiometricAvailable(hasHardware && isEnrolled);
+        const hasCredentials = !!(storedEmail && storedPassword);
+        setHasStoredCredentials(hasCredentials);
+        
+        if (hasCredentials && storedEmail) {
+          setEmail(storedEmail);
+        }
+      } catch (error) {
+        console.error('Error checking biometric availability:', error);
+      }
+    };
+    
+    checkBiometricAvailability();
+  }, []);
+
   // Validate form
   useEffect(() => {
     setIsFormValid(email.length > 0 && password.length > 0);
   }, [email, password]);
+
+  // Clear error after timeout
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        dispatch(clearError());
+      }, 5000); // Clear error after 5 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [error, dispatch]);
+
+  // Keep screen focused on error - prevent navigation reset
+  useFocusEffect(
+    React.useCallback(() => {
+      // Ensure we stay on this screen if there's an error
+      if (error && navigation.isFocused()) {
+        // Screen is already focused, no need to navigate
+        return;
+      }
+    }, [error, navigation])
+  );
 
   const handleLogin = async () => {
     if (!isFormValid) {
@@ -54,8 +105,54 @@ const LoginScreen: React.FC = () => {
 
     try {
       await dispatch(login({ email, password })).unwrap();
+      // Store credentials securely for biometric login
+      try {
+        await SecureStore.setItemAsync('userEmail', email);
+        await SecureStore.setItemAsync('userPassword', password);
+      } catch (error) {
+        console.error('Error storing credentials:', error);
+      }
+      // Navigation will happen automatically if login is successful
+      // (via AppNavigator checking isAuthenticated)
     } catch (err) {
-      // Error is handled by the slice
+      // Error is handled by the slice - stay on login screen
+      // Don't navigate away on error
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    try {
+      if (!biometricAvailable) {
+        Alert.alert('Biometric Unavailable', 'Biometric authentication is not available on this device.');
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Authenticate to sign in',
+        fallbackLabel: 'Use password',
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        // Retrieve stored credentials
+        const storedEmail = await SecureStore.getItemAsync('userEmail');
+        const storedPassword = await SecureStore.getItemAsync('userPassword');
+        
+        if (storedEmail && storedPassword) {
+          setEmail(storedEmail);
+          setPassword(storedPassword);
+          try {
+            await dispatch(login({ email: storedEmail, password: storedPassword })).unwrap();
+          } catch (err) {
+            // Error is handled by the slice
+          }
+        } else {
+          Alert.alert('Error', 'No stored credentials found. Please sign in with your email and password.');
+        }
+      }
+    } catch (error) {
+      console.error('Biometric authentication error:', error);
+      Alert.alert('Authentication Error', 'Biometric authentication failed. Please use your password.');
     }
   };
 
@@ -78,7 +175,7 @@ const LoginScreen: React.FC = () => {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
             <ScrollView
-              contentContainerStyle={styles.scrollContent}
+              contentContainerStyle={[styles.scrollContent, isTablet && styles.scrollContentTablet]}
               showsVerticalScrollIndicator={false}
             >
               {/* Futuristic Background Elements */}
@@ -103,7 +200,7 @@ const LoginScreen: React.FC = () => {
               </View>
 
               {/* Form */}
-              <View style={styles.form}>
+              <View style={[styles.form, isTablet && styles.formTablet]}>
                 {/* Email Input */}
                 <View style={[
                   styles.inputContainer,
@@ -111,7 +208,7 @@ const LoginScreen: React.FC = () => {
                 ]}>
                   <Ionicons
                     name="mail-outline"
-                    size={20}
+                    size={isTablet ? (isLargeTablet ? 28 : 26) : 20}
                     color={isEmailFocused ? "#8F1A27" : "#999"}
                     style={styles.inputIcon}
                   />
@@ -136,7 +233,7 @@ const LoginScreen: React.FC = () => {
                 ]}>
                   <Ionicons
                     name="lock-closed-outline"
-                    size={20}
+                    size={isTablet ? (isLargeTablet ? 28 : 26) : 20}
                     color={isPasswordFocused ? "#8F1A27" : "#999"}
                     style={styles.inputIcon}
                   />
@@ -157,7 +254,7 @@ const LoginScreen: React.FC = () => {
                   >
                     <Ionicons
                       name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
+                      size={isTablet ? (isLargeTablet ? 28 : 26) : 20}
                       color="#666"
                     />
                   </TouchableOpacity>
@@ -168,6 +265,33 @@ const LoginScreen: React.FC = () => {
                   <View style={styles.errorContainer}>
                     <Ionicons name="alert-circle-outline" size={16} color="#ff4444" />
                     <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                )}
+
+                {/* Biometric Login Button */}
+                {biometricAvailable && hasStoredCredentials && (
+                  <TouchableOpacity
+                    style={styles.biometricButton}
+                    onPress={handleBiometricLogin}
+                    disabled={isLoading}
+                  >
+                    <Ionicons 
+                      name={Platform.OS === 'ios' ? 'lock-open-outline' : 'lock-open-outline'} 
+                      size={isTablet ? (isLargeTablet ? 28 : 26) : 24} 
+                      color="#8F1A27" 
+                    />
+                    <Text style={styles.biometricButtonText}>
+                      {Platform.OS === 'ios' ? 'Use Face ID' : 'Use Fingerprint'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Biometric Divider */}
+                {biometricAvailable && hasStoredCredentials && (
+                  <View style={styles.dividerContainer}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>OR</Text>
+                    <View style={styles.dividerLine} />
                   </View>
                 )}
 
@@ -193,6 +317,16 @@ const LoginScreen: React.FC = () => {
                     )}
                   </LinearGradient>
                 </TouchableOpacity>
+
+                {/* Biometric Disclaimer */}
+                {biometricAvailable && (
+                  <View style={styles.disclaimerContainer}>
+                    <Ionicons name="information-circle-outline" size={14} color="#666" />
+                    <Text style={styles.disclaimerText}>
+                      Your biometric data is stored only on your device and is never shared with our servers.
+                    </Text>
+                  </View>
+                )}
 
                 {/* Forgot Password */}
                 <TouchableOpacity
@@ -245,24 +379,29 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingTop: Platform.OS === 'ios' ? 0 : 40,
   },
+  scrollContentTablet: {
+    paddingHorizontal: isLargeTablet ? 100 : 80,
+    maxWidth: isLargeTablet ? 700 : 600,
+    alignSelf: 'center',
+    width: '100%',
+  },
   header: {
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: isTablet ? (isLargeTablet ? 40 : 30) : 10,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 22 : 20) : 14,
     color: '#ffffff',
     fontWeight: '600',
     textAlign: 'center',
     letterSpacing: 1,
-    marginBottom: 30,
-    
+    marginBottom: isTablet ? (isLargeTablet ? 50 : 45) : 30,
   },
   form: {
     backgroundColor: 'white',
     borderRadius: 20,
-    paddingVertical: 30,
-    paddingHorizontal: 20,
+    paddingVertical: isTablet ? (isLargeTablet ? 50 : 45) : 30,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 45 : 40) : 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -272,16 +411,21 @@ const styles = StyleSheet.create({
     shadowRadius: 15,
     elevation: 10,
   },
+  formTablet: {
+    maxWidth: isLargeTablet ? 650 : 550,
+    alignSelf: 'center',
+    width: '100%',
+  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f8f9fa',
-    height: 52,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 20 : 18) : 14,
+    backgroundColor: '#F9FAFB',
+    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
+    marginBottom: isTablet ? (isLargeTablet ? 18 : 16) : 12,
   },
   inputContainerFocused: {
     borderColor: '#8F1A27',
@@ -292,7 +436,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: isTablet ? (isLargeTablet ? 20 : 19) : 16,
     color: '#333',
     height: '100%',
   },
@@ -316,8 +460,8 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     borderRadius: 12,
-    height: 52,
-    marginBottom: 20,
+    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
+    marginBottom: isTablet ? (isLargeTablet ? 24 : 22) : 18,
     overflow: 'hidden',
   },
   buttonGradient: {
@@ -330,17 +474,66 @@ const styles = StyleSheet.create({
   },
   loginButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: isTablet ? (isLargeTablet ? 22 : 20) : 16,
     fontWeight: 'bold',
   },
   forgotPassword: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: isTablet ? (isLargeTablet ? 28 : 26) : 20,
   },
   forgotPasswordText: {
     color: '#8F1A27',
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 14,
     fontWeight: "600",
+  },
+  biometricButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#8F1A27',
+    borderRadius: 12,
+    paddingVertical: isTablet ? (isLargeTablet ? 18 : 16) : 14,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 24 : 22) : 20,
+    marginBottom: isTablet ? (isLargeTablet ? 20 : 18) : 16,
+    backgroundColor: 'transparent',
+  },
+  biometricButtonText: {
+    color: '#8F1A27',
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 15,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: isTablet ? (isLargeTablet ? 20 : 18) : 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e0e0e0',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 14,
+    color: '#999',
+    fontWeight: '500',
+  },
+  disclaimerContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: isTablet ? (isLargeTablet ? 14 : 12) : 10,
+    marginBottom: isTablet ? (isLargeTablet ? 20 : 18) : 16,
+  },
+  disclaimerText: {
+    flex: 1,
+    fontSize: isTablet ? (isLargeTablet ? 13 : 12) : 11,
+    color: '#666',
+    marginLeft: 8,
+    lineHeight: isTablet ? (isLargeTablet ? 18 : 16) : 15,
   },
   registerSection: {
     flexDirection: 'row',
@@ -348,20 +541,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   registerText: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 14,
     color: '#666',
     fontWeight: '400',
   },
   registerLinkText: {
     color: '#8F1A27',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 17) : 14,
   },
   title: {
-    fontSize: 32,
+    fontSize: isTablet ? (isLargeTablet ? 56 : 48) : 32,
     fontWeight: 'bold',
     color: '#FFC540',
-    marginBottom: 8,
+    marginBottom: isTablet ? 12 : 8,
     textAlign: 'center',
     textShadowColor: '#FFC540',
     textShadowOffset: { width: 0, height: 0 },
@@ -410,11 +603,11 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     position: 'relative',
-    marginBottom: 30,
+    marginBottom: isTablet ? (isLargeTablet ? 50 : 40) : 30,
   },
   logo: {
-    width: 170, 
-    height: 120,
+    width: isTablet ? (isLargeTablet ? 280 : 240) : 170, 
+    height: isTablet ? (isLargeTablet ? 200 : 170) : 120,
     borderRadius: 25,
     zIndex: 2,
   },

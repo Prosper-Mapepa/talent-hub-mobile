@@ -41,6 +41,13 @@ const MessagesScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  
+  // Get messages for current conversation directly from Redux to ensure fresh data
+  const selectedConversationMessages = useAppSelector(state => {
+    if (!selectedConversation?.id) return [];
+    const convMessages = state.messages.messages[selectedConversation.id];
+    return Array.isArray(convMessages) ? convMessages : [];
+  });
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
@@ -51,38 +58,83 @@ const MessagesScreen: React.FC = () => {
   const [studentInfo, setStudentInfo] = useState<any>(null);
   const [chatLoadError, setChatLoadError] = useState<string | null>(null);
   const [chatHeaderImageError, setChatHeaderImageError] = useState(false);
+  const [messagesKey, setMessagesKey] = useState(0); // Force re-render key
+  const [localMessages, setLocalMessages] = useState<Message[]>([]); // Local fallback for messages
   const messagesListRef = useRef<FlatList>(null);
 
-  useEffect(() => {
-    // Normalize conversations to ensure it's always an array
-    const normalizedConversations = Array.isArray(conversations) ? conversations : [];
-    console.log('Conversations updated:', normalizedConversations.length, normalizedConversations);
-    
-    if (normalizedConversations.length > 0) {
-      console.log('First conversation:', normalizedConversations[0]);
-    }
-  }, [conversations]);
+  // Removed verbose logging for performance
 
   useEffect(() => {
     if (user?.id) {
-      console.log('Fetching conversations for user:', user.id);
-      dispatch(fetchConversations()).unwrap().then((result) => {
-        console.log('Conversations fetched successfully:', result);
-        if (Array.isArray(result) && result.length === 0) {
-          console.log('No conversations found for user');
-        }
-      }).catch((error: any) => {
-        console.error('Failed to fetch conversations:', error);
+      dispatch(fetchConversations()).catch((error: any) => {
         // Don't show error if it's a 401 (unauthorized) - user probably logged out
         if (error?.response?.status !== 401) {
-          console.error('Non-auth error fetching conversations:', error);
+          console.error('Failed to fetch conversations:', error);
         }
       });
-    } else {
-      console.log('User not logged in, skipping conversation load');
     }
     loadAllUsers();
   }, [dispatch, user?.id]);
+
+  // Monitor messages state changes and force re-render
+  useEffect(() => {
+    if (selectedConversation?.id) {
+      const conversationMessages = messages[selectedConversation.id];
+      console.log('=== MESSAGES STATE MONITOR ===');
+      console.log('Conversation ID:', selectedConversation.id);
+      console.log('Messages object keys:', Object.keys(messages));
+      console.log('Messages for this conversation:', conversationMessages);
+      console.log('Is array?', Array.isArray(conversationMessages));
+      console.log('Message count:', conversationMessages?.length || 0);
+      console.log('All messages state:', JSON.stringify(messages, null, 2));
+      console.log('==============================');
+      
+      // Force re-render when messages change
+      setMessagesKey(prev => prev + 1);
+      
+      // Scroll to bottom when messages are loaded
+      if (Array.isArray(conversationMessages) && conversationMessages.length > 0) {
+        setTimeout(() => {
+          messagesListRef.current?.scrollToEnd({ animated: false });
+        }, 300);
+      }
+    }
+  }, [messages, selectedConversation?.id]);
+
+  // Poll for new messages while conversation is open (real-time updates)
+  useEffect(() => {
+    if (!showChatModal || !selectedConversation?.id || !user?.id) return;
+
+    // Initial fetch with proper error handling
+    const loadMessages = async () => {
+      try {
+        console.log('Polling: Fetching messages for conversation:', selectedConversation.id);
+        const result = await dispatch(fetchMessages(selectedConversation.id)).unwrap();
+        console.log('Polling: Messages fetched successfully, count:', result.messages?.length || 0);
+        // Scroll to bottom after messages load
+        setTimeout(() => {
+          messagesListRef.current?.scrollToEnd({ animated: false });
+        }, 200);
+      } catch (error: any) {
+        if (error?.response?.status !== 401) {
+          console.error('Failed to poll messages:', error);
+          // Don't set error state for polling failures, just log
+        }
+      }
+    };
+
+    loadMessages();
+
+    // Poll for new messages every 10 seconds while chat is open
+    const intervalId = setInterval(() => {
+      loadMessages();
+    }, 10000); // Poll every 10 seconds
+
+    // Cleanup interval when chat closes or conversation changes
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [dispatch, showChatModal, selectedConversation?.id, user?.id]);
 
   useEffect(() => {
     if (searchTerm.trim() === '') {
@@ -232,23 +284,68 @@ const MessagesScreen: React.FC = () => {
 
     setIsSending(true);
     try {
-      await dispatch(sendMessage({
+      const sentMessageResult = await dispatch(sendMessage({
         conversationId: selectedConversation.id,
         messageData: {
           content: newMessage.trim()
         }
       })).unwrap();
+      
       setNewMessage('');
+      
+      // Add message to local state immediately
+      if (sentMessageResult.message) {
+        setLocalMessages(prev => [...prev, sentMessageResult.message]);
+        setMessagesKey(prev => prev + 1);
+      }
+      
       // Refresh messages and conversations list
-      await dispatch(fetchMessages(selectedConversation.id));
+      const messagesResult = await dispatch(fetchMessages(selectedConversation.id)).unwrap();
+      
+      // Update local messages with fresh data
+      if (Array.isArray(messagesResult.messages) && messagesResult.messages.length > 0) {
+        setLocalMessages(messagesResult.messages);
+      }
+      
       await dispatch(fetchConversations());
+      
       // Scroll to bottom after sending
       setTimeout(() => {
         messagesListRef.current?.scrollToEnd({ animated: true });
       }, 100);
+      
+      // Show success toast with small delay to ensure it displays
+      setTimeout(() => {
+        showToast('Message sent successfully!', 'success');
+      }, 150);
     } catch (error: any) {
       console.error('Error sending message:', error);
-      showToast(error?.message || 'Failed to send message', 'error');
+      
+      // Extract error message with priority: API response message > error message (string or object) > status-based fallback
+      let errorMessage = 'Failed to send message.';
+      
+      // Handle string errors (from thunk rejectWithValue)
+      if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      // Handle Axios error objects
+      else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message && !error.message.includes('Request failed with status code')) {
+        // Use error.message only if it's not a generic Axios error message
+        errorMessage = error.message;
+      } else if (error.response?.status === 401) {
+        errorMessage = 'You are not authenticated. Please log out and log back in.';
+      } else if (error.response?.status === 403) {
+        // For 403, check if there's a more specific message in the response
+        errorMessage = error.response?.data?.message || 'You are not authorized to send messages.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Recipient not found.';
+      } else if (error.response?.status === 400) {
+        errorMessage = error.response?.data?.message || 'Invalid request. Please check your message.';
+      }
+      
+      showToast(errorMessage, 'error');
     } finally {
       setIsSending(false);
     }
@@ -273,17 +370,91 @@ const MessagesScreen: React.FC = () => {
       setSelectedConversation(conv);
       setChatLoadError(null);
       setChatHeaderImageError(false); // Reset image error when opening new chat
-      try {
-        await dispatch(fetchMessages(conv.id)).unwrap();
-        // Scroll to bottom when messages load
-        setTimeout(() => {
-          messagesListRef.current?.scrollToEnd({ animated: false });
-        }, 100);
-      } catch (error: any) {
-        console.error('Error loading messages:', error);
-        setChatLoadError('Failed to load messages');
-      }
-      setShowChatModal(true);
+      setLocalMessages([]); // Clear local messages when opening new chat
+      setShowChatModal(true); // Open modal first so the polling effect can run
+      
+      // Fetch messages with retry logic - try both Redux and direct API
+      const loadMessagesWithRetry = async (retries = 3) => {
+        for (let i = 0; i < retries; i++) {
+          try {
+            console.log(`[Attempt ${i + 1}/${retries}] Fetching messages for conversation:`, conv.id);
+            console.log('Current user ID:', user?.id);
+            
+            if (!user?.id) {
+              throw new Error('User ID is missing');
+            }
+            
+            // ALWAYS try direct API call first to see raw response, then use Redux
+            console.log('=== DIRECT API TEST ===');
+            try {
+              const directMessages = await apiService.getMessages(conv!.id, user.id);
+              console.log('Direct API call result:', directMessages);
+              console.log('Direct API messages count:', directMessages.length);
+              console.log('Direct API is array?', Array.isArray(directMessages));
+              if (directMessages.length > 0) {
+                console.log('Direct API first message:', JSON.stringify(directMessages[0], null, 2));
+                setLocalMessages(directMessages);
+                console.log('Stored', directMessages.length, 'messages locally from direct API');
+              } else {
+                console.warn('Direct API returned EMPTY array - no messages in database for this conversation');
+                setLocalMessages([]);
+              }
+            } catch (directError: any) {
+              console.error('Direct API call failed:', directError);
+              console.error('Direct API error response:', directError?.response?.data);
+            }
+            console.log('=== END DIRECT API TEST ===');
+            
+            // Also try Redux for state management
+            try {
+              const result = await dispatch(fetchMessages(conv!.id)).unwrap();
+              console.log('Redux fetch successful:', result);
+              console.log('Redux messages count:', result.messages?.length || 0);
+              
+              // Update local messages if Redux has more
+              if (Array.isArray(result.messages) && result.messages.length > 0) {
+                setLocalMessages(result.messages);
+                console.log('Updated local messages from Redux:', result.messages.length);
+              }
+            } catch (reduxError: any) {
+              console.warn('Redux fetch failed (non-critical):', reduxError);
+              // Don't throw - we already have direct API result
+            }
+            
+            // Wait a bit for state to update
+            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            // Force re-render to pick up new messages
+            setMessagesKey(prev => prev + 1);
+            
+            // Scroll to bottom when messages load
+            setTimeout(() => {
+              messagesListRef.current?.scrollToEnd({ animated: false });
+            }, 400);
+            
+            return; // Success, exit retry loop
+          } catch (error: any) {
+            console.error(`[Attempt ${i + 1}/${retries}] Error loading messages:`, error);
+            console.error('Error details:', {
+              message: error?.message,
+              response: error?.response?.data,
+              status: error?.response?.status
+            });
+            
+            if (i === retries - 1) {
+              // Last attempt failed
+              const errorMsg = error?.response?.data?.message || error?.message || 'Failed to load messages';
+              setChatLoadError(errorMsg);
+              showToast('Failed to load messages. Please try again.', 'error');
+            } else {
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
+      };
+      
+      loadMessagesWithRetry();
     }
   };
 
@@ -440,7 +611,7 @@ const MessagesScreen: React.FC = () => {
     if (!filePath) return '';
     if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
     
-    const apiBaseUrl = process.env.API_BASE_URL || 'http://192.168.0.106:3001';
+    const apiBaseUrl = process.env.API_BASE_URL || 'https://web-production-11221.up.railway.app';
     let cleanPath = filePath;
     
     // Remove leading slash if present
@@ -478,6 +649,12 @@ const MessagesScreen: React.FC = () => {
     // Parse message content for talent context
     const messageParse = lastMessage ? parseMessageContent(lastMessage.content) : null;
 
+    // Check if conversation has unread messages (last message not from current user)
+    const hasUnreadMessage = lastMessage && (
+      lastMessage.senderId !== user?.id && 
+      lastMessage.sender?.id !== user?.id
+    );
+
     // Debug logging
     if (__DEV__ && profileImage) {
       console.log(`Profile image for ${participantName}:`, profileImage, 'Full URL:', getFileUrl(profileImage));
@@ -485,9 +662,11 @@ const MessagesScreen: React.FC = () => {
 
     return (
       <TouchableOpacity
-        style={styles.conversationCard}
+        style={[
+          styles.conversationCard,
+          hasUnreadMessage && styles.conversationCardUnread
+        ]}
         onPress={() => {
-          console.log('Opening conversation:', conversation.id);
           openChat(conversation);
         }}
         activeOpacity={0.7}
@@ -508,7 +687,15 @@ const MessagesScreen: React.FC = () => {
             </View>
           </View>
           <View style={styles.conversationInfo}>
-            <Text style={styles.participantName} numberOfLines={1}>{participantName}</Text>
+            <Text 
+              style={[
+                styles.participantName,
+                hasUnreadMessage && styles.participantNameUnread
+              ]} 
+              numberOfLines={1}
+            >
+              {participantName}
+            </Text>
             {lastMessage ? (
               <View style={styles.messagePreviewContainer}>
                 {messageParse?.talentTitle && (
@@ -520,7 +707,13 @@ const MessagesScreen: React.FC = () => {
                   </View>
                 )}
                 {messageParse?.messageContent ? (
-                  <Text style={styles.lastMessage} numberOfLines={messageParse.talentTitle ? 1 : 2}>
+                  <Text 
+                    style={[
+                      styles.lastMessage,
+                      hasUnreadMessage && styles.lastMessageUnread
+                    ]} 
+                    numberOfLines={messageParse.talentTitle ? 1 : 2}
+                  >
                     {messageParse.messageContent}
                   </Text>
                 ) : null}
@@ -533,7 +726,12 @@ const MessagesScreen: React.FC = () => {
           </View>
           <View style={styles.conversationMeta}>
             {(lastMessage || conversation.updatedAt) && (
-              <Text style={styles.lastMessageTime}>
+              <Text 
+                style={[
+                  styles.lastMessageTime,
+                  hasUnreadMessage && styles.lastMessageTimeUnread
+                ]}
+              >
                 {formatTime(lastMessage?.createdAt || conversation.updatedAt)}
               </Text>
             )}
@@ -548,7 +746,16 @@ const MessagesScreen: React.FC = () => {
   );
 
   const renderMessage = ({ item: message }: { item: Message }) => {
+    if (!message || !message.id) {
+      console.warn('Invalid message item:', message);
+      return null;
+    }
+
     const isMyMessage = message.senderId === user?.id;
+    const messageContent = message.content || '';
+    
+    // Parse message content for talent context
+    const parsed = parseMessageContent(messageContent);
 
     return (
       <View style={[
@@ -559,11 +766,22 @@ const MessagesScreen: React.FC = () => {
           styles.messageBubble,
           isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble
         ]}>
+          {parsed.talentTitle && (
+            <View style={styles.messageTalentBadge}>
+              <Ionicons name="star" size={12} color={isMyMessage ? COLORS.white : COLORS.maroon} />
+              <Text style={[
+                styles.messageTalentBadgeText,
+                isMyMessage ? styles.messageTalentBadgeTextMy : styles.messageTalentBadgeTextOther
+              ]}>
+                {parsed.talentTitle}
+              </Text>
+            </View>
+          )}
           <Text style={[
             styles.messageText,
             isMyMessage ? styles.myMessageText : styles.otherMessageText
           ]}>
-            {message.content}
+            {parsed.messageContent || messageContent}
           </Text>
           <Text style={[
             styles.messageTime,
@@ -631,22 +849,172 @@ const MessagesScreen: React.FC = () => {
               );
             })()}
           </View>
+          <TouchableOpacity
+            style={styles.refreshMessagesButton}
+            onPress={async () => {
+              if (selectedConversation?.id && user?.id) {
+                console.log('Manual refresh: Fetching messages for conversation:', selectedConversation.id);
+                setChatLoadError(null);
+                try {
+                  // Try Redux first
+                  try {
+                    const result = await dispatch(fetchMessages(selectedConversation.id)).unwrap();
+                    console.log('Manual refresh (Redux): Messages fetched, count:', result.messages?.length || 0);
+                    
+                    if (Array.isArray(result.messages) && result.messages.length > 0) {
+                      setLocalMessages(result.messages);
+                    }
+                  } catch (reduxError: any) {
+                    console.warn('Manual refresh Redux failed, trying direct API:', reduxError);
+                    
+                    // Fallback: Direct API call
+                    const directMessages = await apiService.getMessages(selectedConversation.id, user.id);
+                    console.log('Manual refresh (Direct API): Messages fetched, count:', directMessages.length);
+                    
+                    if (Array.isArray(directMessages)) {
+                      setLocalMessages(directMessages);
+                    }
+                  }
+                  
+                  // Force re-render
+                  setMessagesKey(prev => prev + 1);
+                  setTimeout(() => {
+                    messagesListRef.current?.scrollToEnd({ animated: false });
+                  }, 300);
+                } catch (error: any) {
+                  console.error('Manual refresh failed:', error);
+                  setChatLoadError('Failed to refresh messages');
+                }
+              }
+            }}
+          >
+            <Ionicons name="refresh" size={20} color={COLORS.maroon} />
+          </TouchableOpacity>
         </View>
 
         {/* Messages */}
-        <FlatList
-          ref={messagesListRef}
-          data={selectedConversation ? (messages[selectedConversation.id] || []).slice().sort((a, b) => {
-            const dateA = new Date(a.createdAt).getTime();
-            const dateB = new Date(b.createdAt).getTime();
-            return dateA - dateB; // Sort ascending (oldest first)
-          }) : []}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          style={styles.messagesList}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.messagesListContent}
-        />
+        {chatLoadError ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="alert-circle" size={48} color="#d1d5db" />
+            <Text style={styles.emptyText}>{chatLoadError}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={async () => {
+                if (selectedConversation) {
+                  setChatLoadError(null);
+                  try {
+                    await dispatch(fetchMessages(selectedConversation.id)).unwrap();
+                  } catch (error: any) {
+                    setChatLoadError('Failed to load messages');
+                  }
+                }
+              }}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          (() => {
+            if (!selectedConversation) {
+              return (
+                <View style={styles.emptyMessagesContainer}>
+                  <Text style={styles.emptyMessagesText}>Select a conversation</Text>
+                </View>
+              );
+            }
+
+            // Use the direct selector for fresh data, fallback to local messages
+            const conversationMessages = selectedConversationMessages.length > 0 
+              ? selectedConversationMessages 
+              : localMessages;
+            console.log('=== MESSAGE RENDERING DEBUG ===');
+            console.log('Selected conversation ID:', selectedConversation.id);
+            console.log('Current user ID:', user?.id);
+            console.log('Messages object keys:', Object.keys(messages));
+            console.log('Direct selector messages:', selectedConversationMessages);
+            console.log('Local messages:', localMessages);
+            console.log('Using messages:', conversationMessages);
+            console.log('Is array?', Array.isArray(conversationMessages));
+            console.log('Message count:', conversationMessages?.length || 0);
+            
+            // Ensure we have an array - use the direct selector result or local fallback
+            const messagesArray = Array.isArray(conversationMessages) 
+              ? conversationMessages 
+              : [];
+            
+            console.log('Messages array after normalization:', messagesArray.length);
+            
+            // Validate message structure
+            if (messagesArray.length > 0) {
+              console.log('First message structure:', {
+                id: messagesArray[0].id,
+                content: messagesArray[0].content?.substring(0, 50),
+                senderId: messagesArray[0].senderId,
+                createdAt: messagesArray[0].createdAt
+              });
+            }
+            
+            const sortedMessages = messagesArray.slice().sort((a, b) => {
+              const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+              const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+              return dateA - dateB; // Sort ascending (oldest first)
+            });
+            
+            console.log('Sorted messages count:', sortedMessages.length);
+            if (sortedMessages.length > 0) {
+              console.log('First message:', sortedMessages[0]);
+              console.log('Last message:', sortedMessages[sortedMessages.length - 1]);
+            }
+            console.log('==============================');
+            
+            return (
+              <FlatList
+                ref={messagesListRef}
+                data={sortedMessages}
+                renderItem={renderMessage}
+                keyExtractor={(item, index) => item.id || `message-${index}`}
+                key={`messages-${selectedConversation.id}-${messagesKey}-${sortedMessages.length}`} // Force re-render with key
+                style={styles.messagesList}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                  styles.messagesListContent,
+                  sortedMessages.length === 0 && styles.messagesListContentEmpty
+                ]}
+                ListEmptyComponent={
+                  <View style={styles.emptyMessagesContainer}>
+                    <Ionicons name="chatbubble-outline" size={64} color="#d1d5db" />
+                    <Text style={styles.emptyMessagesText}>No messages yet</Text>
+                    <Text style={styles.emptyMessagesSubtext}>Start the conversation!</Text>
+                    {isLoading && (
+                      <View style={{ marginTop: 16 }}>
+                        <ActivityIndicator size="small" color={COLORS.maroon} />
+                        <Text style={styles.emptyMessagesSubtext}>Loading messages...</Text>
+                      </View>
+                    )}
+                  </View>
+                }
+                onContentSizeChange={() => {
+                  // Auto-scroll to bottom when content size changes
+                  if (sortedMessages.length > 0) {
+                    setTimeout(() => {
+                      messagesListRef.current?.scrollToEnd({ animated: false });
+                    }, 100);
+                  }
+                }}
+                onLayout={() => {
+                  // Scroll to bottom on initial layout if messages exist
+                  if (sortedMessages.length > 0) {
+                    setTimeout(() => {
+                      messagesListRef.current?.scrollToEnd({ animated: false });
+                    }, 200);
+                  }
+                }}
+                extraData={`${messagesKey}-${sortedMessages.length}-${selectedConversation.id}`} // Force re-render when messages change
+                removeClippedSubviews={false} // Ensure all messages are rendered
+              />
+            );
+          })()
+        )}
 
         {/* Message Input */}
         <KeyboardAvoidingView
@@ -963,6 +1331,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#F3F4F6',
   },
+  conversationCardUnread: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+    borderWidth: 1.5,
+  },
   conversationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1002,6 +1375,10 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 4,
   },
+  participantNameUnread: {
+    fontWeight: '700',
+    color: '#1F2937',
+  },
   messagePreviewContainer: {
     gap: 4,
   },
@@ -1029,6 +1406,10 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     lineHeight: 20,
   },
+  lastMessageUnread: {
+    color: '#374151',
+    fontWeight: '500',
+  },
   conversationMeta: {
     alignItems: 'flex-end',
     justifyContent: 'center',
@@ -1038,6 +1419,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     fontWeight: '500',
+  },
+  lastMessageTimeUnread: {
+    color: '#8F1A27',
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,
@@ -1119,6 +1504,39 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingVertical: 16,
   },
+  messagesListContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  emptyMessagesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyMessagesText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 16,
+  },
+  emptyMessagesSubtext: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: COLORS.maroon,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   messageContainer: {
     marginVertical: 4,
   },
@@ -1162,6 +1580,28 @@ const styles = StyleSheet.create({
   },
   otherMessageTime: {
     color: COLORS.gray,
+  },
+  messageTalentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  messageTalentBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  messageTalentBadgeTextMy: {
+    color: COLORS.white,
+  },
+  messageTalentBadgeTextOther: {
+    color: COLORS.maroon,
+    backgroundColor: '#FEF2F2',
   },
   inputContainer: {
     backgroundColor: COLORS.white,
@@ -1358,6 +1798,10 @@ const styles = StyleSheet.create({
   },
   chatHeaderText: {
     flex: 1,
+  },
+  refreshMessagesButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   debugContainer: {
     padding: 10,

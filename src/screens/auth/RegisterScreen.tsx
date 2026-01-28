@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,11 +24,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { UserRole } from '../../types';
 import { Picker } from '@react-native-picker/picker';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../types';
+import apiService from '../../services/api';
 
 const { width, height } = Dimensions.get('window');
+const isTablet = width >= 768 || (Platform.OS === 'ios' && Platform.isPad);
+const isLargeTablet = width >= 1024;
 
 const majors = [
   { value: 'COMPUTER_SCIENCE', label: 'Computer Science' },
@@ -55,7 +58,7 @@ const businessTypes = [
 ];
 
 const RegisterScreen: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'student' | 'business'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'faculty' | 'business'>('student');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -96,6 +99,12 @@ const RegisterScreen: React.FC = () => {
     ]).start();
   }, []);
 
+  // EULA acceptance during registration:
+  // 1. User checks checkbox (agreedToTerms = true)
+  // 2. User can read full EULA by clicking Terms link
+  // 3. After registration, user is authenticated and EulaGuard will check/accept EULA
+  // For now, we just track the checkbox state for validation
+
   const [studentData, setStudentData] = useState({
     firstName: '',
     lastName: '',
@@ -104,6 +113,7 @@ const RegisterScreen: React.FC = () => {
     confirmPassword: '',
     major: '',
     year: '',
+    department: '',
   });
   const [businessData, setBusinessData] = useState({
     businessName: '',
@@ -127,8 +137,13 @@ const RegisterScreen: React.FC = () => {
     if (!studentData.password) newErrors.password = 'Password is required';
     if (studentData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     if (studentData.password !== studentData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
-    if (!studentData.major) newErrors.major = 'Major is required';
-    if (!studentData.year) newErrors.year = 'Year is required';
+    if (activeTab === 'student') {
+      if (!studentData.major) newErrors.major = 'Major is required';
+      if (!studentData.year) newErrors.year = 'Year is required';
+    }
+    if (activeTab === 'faculty' && !studentData.department.trim()) {
+      newErrors.department = 'Department is required';
+    }
     if (!agreedToTerms) newErrors.terms = 'You must agree to the terms and conditions';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -158,19 +173,34 @@ const RegisterScreen: React.FC = () => {
     }
     const { confirmPassword, ...registrationData } = studentData;
     try {
-      const result = await dispatch(registerStudent({ ...registrationData, role: UserRole.STUDENT })).unwrap();
+      const selectedRole = activeTab === 'faculty' ? UserRole.FACULTY : UserRole.STUDENT;
+      const payload: any = {
+        ...registrationData,
+        role: selectedRole,
+      };
+      // Backend requires major/year; for faculty we silently send generic defaults
+      if (activeTab === 'faculty') {
+        payload.major = payload.major || 'COMPUTER_SCIENCE';
+        payload.year = payload.year || 'GRADUATE';
+      }
+      const result = await dispatch(registerStudent(payload)).unwrap();
       console.log('Student registration result:', result);
     } catch (err: any) {
       console.log('Student registration error:', err);
-      if (err.response) {
-        console.log('Error response data:', err.response.data);
-        console.log('Error response status:', err.response.status);
-        console.log('Error response headers:', err.response.headers);
-      } else if (err.request) {
-        console.log('No response received:', err.request);
-      } else {
-        console.log('Error message:', err.message);
-      }
+      // Extract and format error message
+      const errorMessage = typeof err === 'string' 
+        ? err 
+        : err?.response?.data?.message || err?.message || 'Registration failed';
+      const formattedError = Array.isArray(errorMessage)
+        ? errorMessage[0] || errorMessage.join(', ')
+        : errorMessage;
+      
+      // Display error using Alert
+      Alert.alert(
+        'Please check your information',
+        formattedError,
+        [{ text: 'OK' }]
+      );
     }
   };
   const handleBusinessRegister = async () => {
@@ -181,24 +211,34 @@ const RegisterScreen: React.FC = () => {
     }
     const { confirmPassword, ...registrationData } = businessData;
     try {
+      // Include agreedToTerms in registration
       const result = await dispatch(registerBusiness({
         ...businessData,
         firstName: 'Business',
         lastName: 'Account',
         role: UserRole.BUSINESS,
+        agreedToTerms: agreedToTerms,
       })).unwrap();
       console.log('Business registration result:', result);
+      
+      // After successful registration, user will be authenticated
+      // EulaGuard will automatically check and show EULA if needed
     } catch (err: any) {
       console.log('Business registration error:', err);
-      if (err.response) {
-        console.log('Error response data:', err.response.data);
-        console.log('Error response status:', err.response.status);
-        console.log('Error response headers:', err.response.headers);
-      } else if (err.request) {
-        console.log('No response received:', err.request);
-      } else {
-        console.log('Error message:', err.message);
-      }
+      // Extract and format error message
+      const errorMessage = typeof err === 'string' 
+        ? err 
+        : err?.response?.data?.message || err?.message || 'Registration failed';
+      const formattedError = Array.isArray(errorMessage)
+        ? errorMessage[0] || errorMessage.join(', ')
+        : errorMessage;
+      
+      // Display error using Alert
+      Alert.alert(
+        'Please check your information',
+        formattedError,
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -226,8 +266,8 @@ const RegisterScreen: React.FC = () => {
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
-            <ScrollView 
-              contentContainerStyle={styles.scrollContent}
+            <ScrollView
+              contentContainerStyle={[styles.scrollContent, isTablet && styles.scrollContentTablet]}
               showsVerticalScrollIndicator={false}
             >
               {/* Futuristic Background Elements */}
@@ -257,11 +297,11 @@ const RegisterScreen: React.FC = () => {
                 >
                   <View style={styles.logoGlow} />
                   <View style={styles.logoContainer}>
-                  <Image 
-                    source={require('../../../assets/ss.png')} 
-                    style={styles.logo} 
-                  />
-                </View>
+                    <Image 
+                      source={require('../../../assets/ss.png')} 
+                      style={styles.logo} 
+                    />
+                  </View>
                 </Animated.View>
                 
                 <Animated.Text 
@@ -276,7 +316,7 @@ const RegisterScreen: React.FC = () => {
                   CMU <Text style={styles.title2}>TALENT</Text>HUB
                 </Animated.Text>
                 
-                <Animated.Text 
+                {/* <Animated.Text 
                   style={[
                     styles.subtitle,
                     {
@@ -286,7 +326,7 @@ const RegisterScreen: React.FC = () => {
                   ]}
                 >
                   Join the CMU TalentHub community
-                </Animated.Text>
+                </Animated.Text> */}
               </Animated.View>
 
               {/* Tab Container */}
@@ -306,6 +346,12 @@ const RegisterScreen: React.FC = () => {
                   <Text style={[styles.tabText, activeTab === 'student' && styles.activeTabText]}>STUDENT</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  style={[styles.tab, activeTab === 'faculty' && styles.activeTab]}
+                  onPress={() => setActiveTab('faculty')}
+                >
+                  <Text style={[styles.tabText, activeTab === 'faculty' && styles.activeTabText]}>FACULTY</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[styles.tab, activeTab === 'business' && styles.activeTab]}
                   onPress={() => setActiveTab('business')}
                 >
@@ -313,33 +359,20 @@ const RegisterScreen: React.FC = () => {
                 </TouchableOpacity>
               </Animated.View>
 
-              {/* Error Message */}
-              {error && (
-                <Animated.View 
-                  style={[
-                    styles.errorContainer,
-                    {
-                      opacity: fadeAnim,
-                      transform: [{ translateY: slideAnim }]
-                    }
-                  ]}
-                >
-                  <Ionicons name="alert-circle-outline" size={16} color="#ff4444" />
-                  <Text style={styles.errorText}>{error}</Text>
-                </Animated.View>
-              )}
+              {/* Error Message - Removed per user request */}
 
               {/* Form */}
               <Animated.View 
                 style={[
                   styles.form,
+                  isTablet && styles.formTablet,
                   {
                     opacity: fadeAnim,
                     transform: [{ translateY: formSlideAnim }]
                   }
                 ]}
               >
-                {activeTab === 'student' ? (
+                {activeTab !== 'business' ? (
                   <View style={styles.nameRow}>
                     <View style={[styles.inputContainer, styles.halfInput]}>
                       <TextInput
@@ -363,181 +396,18 @@ const RegisterScreen: React.FC = () => {
                     </View>
                   </View>
                 ) : (
-                  <View style={styles.inputContainer}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Business Name"
-                      placeholderTextColor="#666"
-                      value={businessData.businessName}
-                      onChangeText={text => handleBusinessChange('businessName', text)}
-                    />
+                  <>
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Business Name"
+                        placeholderTextColor="#666"
+                        value={businessData.businessName}
+                        onChangeText={text => handleBusinessChange('businessName', text)}
+                      />
+                    </View>
                     {errors.businessName && <Text style={styles.fieldError}>{errors.businessName}</Text>}
-                  </View>
-                )}
-                <View style={styles.inputContainer}>
-                  {/* <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} /> */}
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Email"
-                    placeholderTextColor="#666"
-                    value={activeTab === 'student' ? studentData.email : businessData.email}
-                    onChangeText={text => activeTab === 'student' ? handleStudentChange('email', text) : handleBusinessChange('email', text)}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
-                </View>
-                {errors.email && <Text style={styles.fieldError}>{errors.email}</Text>}
-                {activeTab === 'student' ? (
-                  <>
-                    <View style={styles.inputContainer}>
-                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Password"
-                        placeholderTextColor="#666"
-                        value={studentData.password}
-                        onChangeText={text => handleStudentChange('password', text)}
-                        secureTextEntry={!showPassword}
-                      />
-                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                        <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#666" />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
-                    <View style={styles.inputContainer}>
-                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Confirm Password"
-                        placeholderTextColor="#666"
-                        value={studentData.confirmPassword}
-                        onChangeText={text => handleStudentChange('confirmPassword', text)}
-                        secureTextEntry={!showConfirmPassword}
-                      />
-                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                        <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#666" />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
-                    <TouchableOpacity 
-                      style={styles.selectContainer}
-                      onPress={() => setShowMajorPicker(true)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.selectText, !studentData.major && styles.selectPlaceholder]}>
-                        {studentData.major ? majors.find(m => m.value === studentData.major)?.label : 'Select Major'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color="#666" />
-                    </TouchableOpacity>
-                    {errors.major && <Text style={styles.fieldError}>{errors.major}</Text>}
-                    <TouchableOpacity 
-                      style={styles.selectContainer}
-                      onPress={() => setShowYearPicker(true)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.selectText, !studentData.year && styles.selectPlaceholder]}>
-                        {studentData.year ? years.find(y => y.value === studentData.year)?.label : 'Select Year'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color="#666" />
-                    </TouchableOpacity>
-                    {errors.year && <Text style={styles.fieldError}>{errors.year}</Text>}
-                    
-                    {/* Major Picker Modal */}
-                    <Modal
-                      visible={showMajorPicker}
-                      transparent={true}
-                      animationType="slide"
-                      onRequestClose={() => setShowMajorPicker(false)}
-                    >
-                      <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                          <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Select Major</Text>
-                            <TouchableOpacity onPress={() => setShowMajorPicker(false)}>
-                              <Ionicons name="close" size={24} color="#333" />
-                            </TouchableOpacity>
-                          </View>
-                      <Picker
-                        selectedValue={studentData.major}
-                            onValueChange={(value: string) => {
-                              handleStudentChange('major', value);
-                              setShowMajorPicker(false);
-                            }}
-                            style={styles.modalPicker}
-                      >
-                        <Picker.Item label="Select Major" value="" />
-                        {majors.map(option => (
-                          <Picker.Item key={option.value} label={option.label} value={option.value} />
-                        ))}
-                      </Picker>
-                    </View>
-                      </View>
-                    </Modal>
 
-                    {/* Year Picker Modal */}
-                    <Modal
-                      visible={showYearPicker}
-                      transparent={true}
-                      animationType="slide"
-                      onRequestClose={() => setShowYearPicker(false)}
-                    >
-                      <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                          <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Select Year</Text>
-                            <TouchableOpacity onPress={() => setShowYearPicker(false)}>
-                              <Ionicons name="close" size={24} color="#333" />
-                            </TouchableOpacity>
-                          </View>
-                      <Picker
-                        selectedValue={studentData.year}
-                            onValueChange={(value: string) => {
-                              handleStudentChange('year', value);
-                              setShowYearPicker(false);
-                            }}
-                            style={styles.modalPicker}
-                      >
-                        <Picker.Item label="Select Year" value="" />
-                        {years.map(option => (
-                          <Picker.Item key={option.value} label={option.label} value={option.value} />
-                        ))}
-                      </Picker>
-                    </View>
-                      </View>
-                    </Modal>
-                  </>
-                ) : (
-                  <>
-                    <View style={styles.inputContainer}>
-                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Password"
-                        placeholderTextColor="#666"
-                        value={businessData.password}
-                        onChangeText={text => handleBusinessChange('password', text)}
-                        secureTextEntry={!showPassword}
-                      />
-                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                        <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#666" />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
-                    <View style={styles.inputContainer}>
-                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Confirm Password"
-                        placeholderTextColor="#666"
-                        value={businessData.confirmPassword}
-                        onChangeText={text => handleBusinessChange('confirmPassword', text)}
-                        secureTextEntry={!showConfirmPassword}
-                      />
-                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                        <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#666" />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
                     <TouchableOpacity 
                       style={styles.selectContainer}
                       onPress={() => setShowBusinessTypePicker(true)}
@@ -549,7 +419,18 @@ const RegisterScreen: React.FC = () => {
                       <Ionicons name="chevron-down" size={20} color="#666" />
                     </TouchableOpacity>
                     {errors.businessType && <Text style={styles.fieldError}>{errors.businessType}</Text>}
-                    
+
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Location"
+                        placeholderTextColor="#666"
+                        value={businessData.location}
+                        onChangeText={text => handleBusinessChange('location', text)}
+                      />
+                    </View>
+                    {errors.location && <Text style={styles.fieldError}>{errors.location}</Text>}
+
                     {/* Business Type Picker Modal */}
                     <Modal
                       visible={showBusinessTypePicker}
@@ -565,42 +446,231 @@ const RegisterScreen: React.FC = () => {
                               <Ionicons name="close" size={24} color="#333" />
                             </TouchableOpacity>
                           </View>
-                      <Picker
-                        selectedValue={businessData.businessType}
+                          <Picker
+                            selectedValue={businessData.businessType}
                             onValueChange={(value: string) => {
                               handleBusinessChange('businessType', value);
                               setShowBusinessTypePicker(false);
                             }}
                             style={styles.modalPicker}
-                      >
-                        <Picker.Item label="Select Business Type" value="" />
-                        {businessTypes.map(option => (
-                          <Picker.Item key={option.value} label={option.label} value={option.value} />
-                        ))}
-                      </Picker>
-                    </View>
+                          >
+                            <Picker.Item label="Select Business Type" value="" />
+                            {businessTypes.map(option => (
+                              <Picker.Item key={option.value} label={option.label} value={option.value} />
+                            ))}
+                          </Picker>
+                        </View>
                       </View>
                     </Modal>
+                  </>
+                )}
+                <View style={styles.inputContainer}>
+                  {/* <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} /> */}
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Email"
+                    placeholderTextColor="#666"
+                    value={activeTab === 'business' ? businessData.email : studentData.email}
+                    onChangeText={text =>
+                      activeTab === 'business'
+                        ? handleBusinessChange('email', text)
+                        : handleStudentChange('email', text)
+                    }
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+                {errors.email && <Text style={styles.fieldError}>{errors.email}</Text>}
+                {activeTab === 'business' ? (
+                  <>
                     <View style={styles.inputContainer}>
                       <TextInput
                         style={styles.input}
-                        placeholder="Location"
+                        placeholder="Password"
                         placeholderTextColor="#666"
-                        value={businessData.location}
-                        onChangeText={text => handleBusinessChange('location', text)}
+                        value={businessData.password}
+                        onChangeText={text => handleBusinessChange('password', text)}
+                        secureTextEntry={!showPassword}
                       />
+                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
+                        <Ionicons
+                          name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                          size={isTablet ? (isLargeTablet ? 24 : 22) : 20}
+                          color="#666"
+                        />
+                      </TouchableOpacity>
                     </View>
-                    {errors.location && <Text style={styles.fieldError}>{errors.location}</Text>}
+                    {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Confirm Password"
+                        placeholderTextColor="#666"
+                        value={businessData.confirmPassword}
+                        onChangeText={text => handleBusinessChange('confirmPassword', text)}
+                        secureTextEntry={!showConfirmPassword}
+                      />
+                      <TouchableOpacity
+                        style={styles.passwordToggle}
+                        onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                      >
+                        <Ionicons
+                          name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                          size={isTablet ? (isLargeTablet ? 24 : 22) : 20}
+                          color="#666"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                    {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.inputContainer}>
+                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Password"
+                        placeholderTextColor="#666"
+                        value={studentData.password}
+                        onChangeText={text => handleStudentChange('password', text)}
+                        secureTextEntry={!showPassword}
+                      />
+                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
+                        <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={isTablet ? (isLargeTablet ? 24 : 22) : 20} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+                    {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
+                    <View style={styles.inputContainer}>
+                      {/* <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} /> */}
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Confirm Password"
+                        placeholderTextColor="#666"
+                        value={studentData.confirmPassword}
+                        onChangeText={text => handleStudentChange('confirmPassword', text)}
+                        secureTextEntry={!showConfirmPassword}
+                      />
+                      <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+                        <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={isTablet ? (isLargeTablet ? 24 : 22) : 20} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+                    {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
+                    {activeTab === 'faculty' ? (
+                      <>
+                        <View style={styles.inputContainer}>
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Department"
+                            placeholderTextColor="#666"
+                            value={studentData.department}
+                            onChangeText={text => handleStudentChange('department', text)}
+                          />
+                        </View>
+                        {errors.department && <Text style={styles.fieldError}>{errors.department}</Text>}
+                      </>
+                    ) : (
+                      <>
+                        <TouchableOpacity 
+                          style={styles.selectContainer}
+                          onPress={() => setShowMajorPicker(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.selectText, !studentData.major && styles.selectPlaceholder]}>
+                            {studentData.major ? majors.find(m => m.value === studentData.major)?.label : 'Select Major'}
+                          </Text>
+                          <Ionicons name="chevron-down" size={20} color="#666" />
+                        </TouchableOpacity>
+                        {errors.major && <Text style={styles.fieldError}>{errors.major}</Text>}
+                        <TouchableOpacity 
+                          style={styles.selectContainer}
+                          onPress={() => setShowYearPicker(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.selectText, !studentData.year && styles.selectPlaceholder]}>
+                            {studentData.year ? years.find(y => y.value === studentData.year)?.label : 'Select Year'}
+                          </Text>
+                          <Ionicons name="chevron-down" size={20} color="#666" />
+                        </TouchableOpacity>
+                        {errors.year && <Text style={styles.fieldError}>{errors.year}</Text>}
+                        
+                        {/* Major Picker Modal */}
+                        <Modal
+                          visible={showMajorPicker}
+                          transparent={true}
+                          animationType="slide"
+                          onRequestClose={() => setShowMajorPicker(false)}
+                        >
+                          <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                              <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Select Major</Text>
+                                <TouchableOpacity onPress={() => setShowMajorPicker(false)}>
+                                  <Ionicons name="close" size={24} color="#333" />
+                                </TouchableOpacity>
+                              </View>
+                              <Picker
+                                selectedValue={studentData.major}
+                                onValueChange={(value: string) => {
+                                  handleStudentChange('major', value);
+                                  setShowMajorPicker(false);
+                                }}
+                                style={styles.modalPicker}
+                              >
+                                <Picker.Item label="Select Major" value="" />
+                                {majors.map(option => (
+                                  <Picker.Item key={option.value} label={option.label} value={option.value} />
+                                ))}
+                              </Picker>
+                            </View>
+                          </View>
+                        </Modal>
+
+                        {/* Year Picker Modal */}
+                        <Modal
+                          visible={showYearPicker}
+                          transparent={true}
+                          animationType="slide"
+                          onRequestClose={() => setShowYearPicker(false)}
+                        >
+                          <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                              <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Select Year</Text>
+                                <TouchableOpacity onPress={() => setShowYearPicker(false)}>
+                                  <Ionicons name="close" size={24} color="#333" />
+                                </TouchableOpacity>
+                              </View>
+                              <Picker
+                                selectedValue={studentData.year}
+                                onValueChange={(value: string) => {
+                                  handleStudentChange('year', value);
+                                  setShowYearPicker(false);
+                                }}
+                                style={styles.modalPicker}
+                              >
+                                <Picker.Item label="Select Year" value="" />
+                                {years.map(option => (
+                                  <Picker.Item key={option.value} label={option.label} value={option.value} />
+                                ))}
+                              </Picker>
+                            </View>
+                          </View>
+                        </Modal>
+                      </>
+                    )}
                   </>
                 )}
                 <View style={styles.termsRow}>
-                  <TouchableOpacity onPress={() => setAgreedToTerms(!agreedToTerms)} style={styles.checkbox}>
+                  <TouchableOpacity 
+                    onPress={() => setAgreedToTerms(!agreedToTerms)} 
+                    style={styles.checkbox}
+                  >
                     <Ionicons name={agreedToTerms ? 'checkbox' : 'square-outline'} size={20} color="#8F1A27" />
                   </TouchableOpacity>
                   <View style={styles.termsTextContainer}>
                     <Text style={styles.termsText}>I agree to the </Text>
-                    <TouchableOpacity onPress={() => navigation.navigate('TermsConditions')}>
-                      <Text style={styles.termsConditionsLink}>Terms and Conditions</Text>
+                    <TouchableOpacity onPress={() => navigation.navigate('Eula')}>
+                      <Text style={styles.termsConditionsLink}>Terms of Service</Text>
                     </TouchableOpacity>
                     <Text style={styles.termsText}> and </Text>
                     <TouchableOpacity onPress={() => navigation.navigate('PrivacyPolicy')}>
@@ -611,7 +681,7 @@ const RegisterScreen: React.FC = () => {
                 {errors.terms && <Text style={styles.fieldError}>{errors.terms}</Text>}
                 <TouchableOpacity
                   style={[styles.registerButton, isLoading && styles.disabledButton]}
-                  onPress={activeTab === 'student' ? handleStudentRegister : handleBusinessRegister}
+                  onPress={activeTab === 'business' ? handleBusinessRegister : handleStudentRegister}
                   disabled={isLoading}
                 >
                   <LinearGradient
@@ -620,7 +690,17 @@ const RegisterScreen: React.FC = () => {
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                   >
-                    {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.registerButtonText}>{activeTab === 'student' ? 'Create Student Account' : 'Create Business Account'}</Text>}
+                    {isLoading ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.registerButtonText}>
+                        {activeTab === 'business'
+                          ? 'Create Business Account'
+                          : activeTab === 'faculty'
+                            ? 'Create Faculty Account'
+                            : 'Create Student Account'}
+                      </Text>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
                 
@@ -664,19 +744,24 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingTop: Platform.OS === 'ios' ? 0 : 40,
   },
+  scrollContentTablet: {
+    paddingHorizontal: isLargeTablet ? 100 : 80,
+    maxWidth: isLargeTablet ? 700 : 600,
+    alignSelf: 'center',
+    width: '100%',
+  },
   header: {
     alignItems: 'center',
-    marginTop: 5,
-    marginBottom: 20,
+    marginTop: isTablet ? (isLargeTablet ? 40 : 30) : 5,
+    marginBottom: isTablet ? (isLargeTablet ? 50 : 40) : 20,
     zIndex: 1,
   },
   logoContainer: {
     position: 'relative',
-    // marginBottom: 10,
   },
   logo: {
-    width: 160, 
-    height: 120,
+    width: isTablet ? (isLargeTablet ? 280 : 240) : 160, 
+    height: isTablet ? (isLargeTablet ? 200 : 170) : 120,
     borderRadius: 25,
     zIndex: 2,
   },
@@ -691,10 +776,10 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   title: {
-    fontSize: 28,
+    fontSize: isTablet ? (isLargeTablet ? 56 : 48) : 28,
     fontWeight: 'bold',
     color: '#FFC540',
-    marginBottom: 8,
+    marginBottom: isTablet ? 12 : 8,
     textAlign: 'center',
     textShadowColor: '#FFC540',
     textShadowOffset: { width: 0, height: 0 },
@@ -705,7 +790,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 22 : 20) : 14,
     color: '#ffffff',
     fontWeight: '600',
     textAlign: 'center',
@@ -715,15 +800,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 15,
-    padding: 4,
-    marginBottom: 10,
+    padding: 3,
+    marginBottom: isTablet ? (isLargeTablet ? 30 : 25) : 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 197, 64, 0.3)',
+    maxWidth: '100%',
+    alignSelf: 'center',
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: isTablet ? (isLargeTablet ? 16 : 14) : 10,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 20 : 18) : 12,
     borderRadius: 12,
     alignItems: 'center',
   },
@@ -731,10 +818,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFC540',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 18 : 16) : 12,
     fontWeight: 'bold',
     color: '#ffffff',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   activeTabText: {
     color: '#8F1A27',
@@ -751,13 +838,13 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#ff4444',
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 14,
     marginLeft: 8,
   },
   form: {
     backgroundColor: 'white',
     borderRadius: 20,
-    padding: 20,
+    padding: isTablet ? (isLargeTablet ? 40 : 32) : 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -767,21 +854,25 @@ const styles = StyleSheet.create({
     shadowRadius: 15,
     elevation: 10,
   },
+  formTablet: {
+    maxWidth: isLargeTablet ? 650 : 550,
+    alignSelf: 'center',
+    width: '100%',
+  },
   nameRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    // marginBottom: 1,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f8f9fa',
-    height: 52,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 20 : 18) : 14,
+    backgroundColor: '#F9FAFB',
+    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
+    marginBottom: isTablet ? (isLargeTablet ? 18 : 16) : 12,
   },
   halfInput: {
     flex: 0.48,
@@ -791,7 +882,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: isTablet ? (isLargeTablet ? 20 : 19) : 16,
     color: '#333',
     height: '100%',
   },
@@ -801,18 +892,18 @@ const styles = StyleSheet.create({
   selectContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f8f9fa',
-    height: 52,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: isTablet ? (isLargeTablet ? 20 : 18) : 14,
+    backgroundColor: '#F9FAFB',
+    height: isTablet ? (isLargeTablet ? 60 : 56) : 46,
+    marginBottom: isTablet ? (isLargeTablet ? 18 : 16) : 12,
     justifyContent: 'space-between',
   },
   selectText: {
     flex: 1,
-    fontSize: 16,
+    fontSize: isTablet ? (isLargeTablet ? 20 : 19) : 16,
     color: '#333',
   },
   selectPlaceholder: {
@@ -821,8 +912,8 @@ const styles = StyleSheet.create({
   picker: {
     flex: 1,
     color: '#333',
-    fontSize: 16,
-    height: 52,
+    fontSize: isTablet ? (isLargeTablet ? 20 : 19) : 16,
+    height: isTablet ? (isLargeTablet ? 70 : 64) : 52,
   },
   modalOverlay: {
     flex: 1,
@@ -845,7 +936,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e0e0e0',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: isTablet ? (isLargeTablet ? 22 : 20) : 18,
     fontWeight: 'bold',
     color: '#333',
   },
@@ -854,7 +945,7 @@ const styles = StyleSheet.create({
   },
   fieldError: {
     color: '#ff4444',
-    fontSize: 12,
+    fontSize: isTablet ? (isLargeTablet ? 14 : 13) : 12,
     marginTop: -12,
     marginBottom: 8,
     marginLeft: 4,
@@ -875,24 +966,24 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   termsText: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 14,
     color: '#666',
   },
   privacyPolicyLink: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 14,
     color: '#8F1A27',
     // fontWeight: 'bold',
     textDecorationLine: 'underline',
   },
   termsConditionsLink: {
-    fontSize: 14,
+    fontSize: isTablet ? (isLargeTablet ? 16 : 15) : 14,
     color: '#8F1A27',
     // fontWeight: 'bold',
     textDecorationLine: 'underline',
   },
   registerButton: {
     borderRadius: 12,
-    height: 52,
+    height: isTablet ? (isLargeTablet ? 70 : 64) : 52,
     overflow: 'hidden',
     shadowColor: '#8F1A27',
     shadowOffset: {
@@ -915,7 +1006,7 @@ const styles = StyleSheet.create({
   },
   registerButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: isTablet ? (isLargeTablet ? 22 : 20) : 16,
     fontWeight: 'bold',
     letterSpacing: 1,
   },

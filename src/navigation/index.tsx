@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useSelector } from 'react-redux';
-import { RootState } from '../store';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState, AppDispatch } from '../store';
+import { fetchConversations } from '../store/slices/messagesSlice';
 
 // Import screens
 import LoadingScreen from '../screens/LoadingScreen';
@@ -11,8 +12,10 @@ import WelcomeScreen from '../screens/auth/WelcomeScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
+import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen';
 import PrivacyPolicyScreen from '../screens/legal/PrivacyPolicyScreen';
 import TermsConditionsScreen from '../screens/legal/TermsConditionsScreen';
+import EulaScreen from '../screens/auth/EulaScreen';
 import JobsScreen from '../screens/jobs/JobsScreen';
 import JobDetailScreen from '../screens/jobs/JobDetailScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
@@ -37,6 +40,7 @@ import JobApplicationsScreen from '../screens/business/JobApplicationsScreen';
 // Import components
 import TabBarIcon from '../components/TabBarIcon';
 import { COLORS } from '../theme/colors';
+import EulaGuard from '../components/EulaGuard';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -47,13 +51,58 @@ const AuthStack = () => (
     <Stack.Screen name="Login" component={LoginScreen} />
     <Stack.Screen name="Register" component={RegisterScreen} />
     <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
     <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
     <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
+    <Stack.Screen name="Eula" component={EulaScreen} />
   </Stack.Navigator>
 );
 
 const MainTabNavigator = () => {
+  const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((state: RootState) => state.auth);
+  const { conversations } = useSelector((state: RootState) => state.messages);
+
+  // Fetch conversations when user is available (on login) and poll for updates
+  React.useEffect(() => {
+    if (!user?.id) return;
+
+    // Initial fetch
+    const fetchInitialConversations = () => {
+      dispatch(fetchConversations()).catch((error: any) => {
+        // Silently fail - don't show error if it's a 401 (user probably logged out)
+        if (error?.response?.status !== 401) {
+          console.error('Failed to fetch conversations:', error);
+        }
+      });
+    };
+
+    fetchInitialConversations();
+
+    // Poll for new conversations every 30 seconds
+    const intervalId = setInterval(() => {
+      dispatch(fetchConversations()).catch((error: any) => {
+        if (error?.response?.status !== 401) {
+          console.error('Failed to poll conversations:', error);
+        }
+      });
+    }, 30000); // Poll every 30 seconds
+
+    // Cleanup interval on unmount or when user changes
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [dispatch, user?.id]);
+
+  // Calculate unread message count (conversations with lastMessage not sent by current user)
+  const unreadCount = React.useMemo(() => {
+    if (!user?.id || !Array.isArray(conversations)) return 0;
+    return conversations.filter(conv => {
+      if (!conv.lastMessage) return false;
+      // Count as unread if last message is not from current user
+      return conv.lastMessage.senderId !== user.id && conv.lastMessage.sender?.id !== user.id;
+    }).length;
+  }, [conversations, user?.id]);
 
   return (
     <Tab.Navigator
@@ -65,6 +114,9 @@ const MainTabNavigator = () => {
         tabBarActiveTintColor: '#6A0032',
         tabBarInactiveTintColor: 'gray',
         headerShown: false,
+        tabBarStyle: {
+          paddingBottom: 10,
+        },
       })}
     >
       <Tab.Screen name="Talents" component={TalentsScreen} />
@@ -72,7 +124,19 @@ const MainTabNavigator = () => {
       {user?.role === 'student' && (
         <Tab.Screen name="Applications" component={ApplicationsScreen} />
       )}
-      <Tab.Screen name="Messages" component={MessagesScreen} />
+      <Tab.Screen 
+        name="Messages" 
+        component={MessagesScreen}
+        options={{
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: '#dc2626',
+            fontSize: 12,
+            minWidth: 20,
+            height: 20,
+          },
+        }}
+      />
       {/* <Tab.Screen name="Products" component={ProductsScreen} /> */}
       <Tab.Screen name="Profile" component={ProfileScreen} />
       {user?.role === 'business' && (
@@ -106,7 +170,7 @@ const MainStack = () => (
     <Stack.Screen 
       name="StudentProfile" 
       component={StudentProfileScreen}
-      options={{ title: 'Student Profile' }}
+      options={{ title: '' }}
     />
     <Stack.Screen 
       name="BusinessProfile" 
@@ -163,31 +227,53 @@ const MainStack = () => (
   </Stack.Navigator>
 );
 
-const AppNavigator = () => {
+const AppNavigator = React.forwardRef<any>((props, ref) => {
   const { isAuthenticated, isLoading } = useSelector((state: RootState) => state.auth);
+  const navigationRef = useRef<any>(null);
+  const isInitialLoad = useRef(true);
 
-  if (isLoading) {
-    // Show loading screen
-    return (
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Loading" component={LoadingScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    );
-  }
+  // Expose navigation ref to parent for deep linking
+  React.useImperativeHandle(ref, () => navigationRef.current, []);
+
+  // Only show loading screen on initial app load, not during login attempts
+  React.useEffect(() => {
+    if (!isLoading && isInitialLoad.current) {
+      isInitialLoad.current = false;
+    }
+  }, [isLoading]);
+
+  const shouldShowLoading = isLoading && isInitialLoad.current;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainStack} />
+        {shouldShowLoading ? (
+          <Stack.Screen name="Loading" component={LoadingScreen} />
+        ) : isAuthenticated ? (
+          <Stack.Screen name="Main">
+            {() => (
+              <EulaGuard>
+                <MainStack />
+              </EulaGuard>
+            )}
+          </Stack.Screen>
         ) : (
-          <Stack.Screen name="Auth" component={AuthStack} />
+          <Stack.Screen 
+            name="Auth" 
+            component={AuthStack}
+            options={{ 
+              transitionSpec: {
+                open: { animation: 'timing', config: { duration: 0 } },
+                close: { animation: 'timing', config: { duration: 0 } },
+              },
+            }}
+          />
         )}
       </Stack.Navigator>
     </NavigationContainer>
   );
-};
+});
+
+AppNavigator.displayName = 'AppNavigator';
 
 export default AppNavigator; 
