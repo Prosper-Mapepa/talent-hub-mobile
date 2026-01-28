@@ -17,9 +17,9 @@
     "build:prod:ios": "eas build --profile production --platform ios",
     "build:prod:android": "eas build --profile production --platform android",
     "build:prod:all": "eas build --profile production --platform all",
-    "update:check": "eas update:check",
     "update:configure": "eas update:configure",
-    "update:publish": "eas update:publish --branch production",
+    "update:publish": "eas update --branch production",
+    "update:list": "eas update:list",
     "update:view": "eas update:view",
     "submit:ios": "eas submit --platform ios --profile production",
     "submit:android": "eas submit --platform android --profile production"
